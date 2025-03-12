@@ -1,4 +1,4 @@
-import React, { useState, useContext } from "react";
+import React, { useState, useContext, useEffect } from "react";
 import {
   Button,
   TextField,
@@ -8,7 +8,6 @@ import {
   IconButton,
   Tooltip,
   Typography,
-  Divider,
   useTheme,
   Snackbar,
   Alert,
@@ -37,12 +36,12 @@ const Options = ({ children }) => {
     callUser,
     stream,
   } = useContext(SocketContext);
-  
+
   const [idToCall, setIdToCall] = useState("");
   const [copied, setCopied] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  
+
   const theme = useTheme();
 
   const handleCopyClick = () => {
@@ -53,7 +52,7 @@ const Options = ({ children }) => {
 
   const toggleVideo = () => {
     if (stream) {
-      stream.getVideoTracks().forEach(track => {
+      stream.getVideoTracks().forEach((track) => {
         track.enabled = !videoEnabled;
       });
       setVideoEnabled(!videoEnabled);
@@ -62,15 +61,31 @@ const Options = ({ children }) => {
 
   const toggleAudio = () => {
     if (stream) {
-      stream.getAudioTracks().forEach(track => {
+      stream.getAudioTracks().forEach((track) => {
         track.enabled = !audioEnabled;
       });
       setAudioEnabled(!audioEnabled);
     }
   };
 
+  // Reset media controls when stream changes
+  useEffect(() => {
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+
+      if (videoTrack) {
+        setVideoEnabled(videoTrack.enabled);
+      }
+
+      if (audioTrack) {
+        setAudioEnabled(audioTrack.enabled);
+      }
+    }
+  }, [stream]);
+
   return (
-    <Box sx={{ width: '100%', position: 'relative' }}>
+    <Box sx={{ width: "100%", position: "relative" }}>
       {/* Controls for ongoing call */}
       {callAccepted && !callEnded && (
         <Paper
@@ -79,58 +94,77 @@ const Options = ({ children }) => {
             p: 2,
             mb: 2,
             borderRadius: 4,
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
           }}
         >
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: "flex", gap: 1 }}>
             <Tooltip title={audioEnabled ? "Mute" : "Unmute"}>
-              <IconButton 
-                onClick={toggleAudio} 
-                sx={{ 
-                  backgroundColor: audioEnabled ? 'rgba(0,0,0,0.05)' : theme.palette.secondary.main,
-                  color: audioEnabled ? 'inherit' : 'white',
-                  '&:hover': { 
-                    backgroundColor: audioEnabled ? 'rgba(0,0,0,0.1)' : theme.palette.secondary.dark 
-                  }
+              <IconButton
+                onClick={toggleAudio}
+                sx={{
+                  backgroundColor: audioEnabled
+                    ? "rgba(0,0,0,0.05)"
+                    : theme.palette.secondary.main,
+                  color: audioEnabled ? "inherit" : "white",
+                  "&:hover": {
+                    backgroundColor: audioEnabled
+                      ? "rgba(0,0,0,0.1)"
+                      : theme.palette.secondary.dark,
+                  },
                 }}
               >
                 {audioEnabled ? <Mic /> : <MicOff />}
               </IconButton>
             </Tooltip>
-            
-            <Tooltip title={videoEnabled ? "Turn off camera" : "Turn on camera"}>
-              <IconButton 
-                onClick={toggleVideo} 
-                sx={{ 
-                  backgroundColor: videoEnabled ? 'rgba(0,0,0,0.05)' : theme.palette.secondary.main,
-                  color: videoEnabled ? 'inherit' : 'white',
-                  '&:hover': { 
-                    backgroundColor: videoEnabled ? 'rgba(0,0,0,0.1)' : theme.palette.secondary.dark 
-                  }
+
+            <Tooltip
+              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+            >
+              <IconButton
+                onClick={toggleVideo}
+                sx={{
+                  backgroundColor: videoEnabled
+                    ? "rgba(0,0,0,0.05)"
+                    : theme.palette.secondary.main,
+                  color: videoEnabled ? "inherit" : "white",
+                  "&:hover": {
+                    backgroundColor: videoEnabled
+                      ? "rgba(0,0,0,0.1)"
+                      : theme.palette.secondary.dark,
+                  },
                 }}
               >
                 {videoEnabled ? <Videocam /> : <VideocamOff />}
               </IconButton>
             </Tooltip>
-            
+
             <Tooltip title="End call">
-              <IconButton 
-                onClick={leaveCall} 
-                sx={{ 
+              <IconButton
+                onClick={leaveCall}
+                sx={{
                   backgroundColor: theme.palette.secondary.main,
-                  color: 'white',
-                  '&:hover': { backgroundColor: theme.palette.secondary.dark }
+                  color: "white",
+                  "&:hover": {
+                    backgroundColor: theme.palette.secondary.dark,
+                  },
                 }}
               >
                 <CallEnd />
               </IconButton>
             </Tooltip>
-            
+
             <Tooltip title="Settings">
-              <IconButton sx={{ backgroundColor: 'rgba(0,0,0,0.05)', '&:hover': { backgroundColor: 'rgba(0,0,0,0.1)' } }}>
+              <IconButton
+                sx={{
+                  backgroundColor: "rgba(0,0,0,0.05)",
+                  "&:hover": {
+                    backgroundColor: "rgba(0,0,0,0.1)",
+                  },
+                }}
+              >
                 <Settings />
               </IconButton>
             </Tooltip>
@@ -144,7 +178,7 @@ const Options = ({ children }) => {
         sx={{
           p: 3,
           borderRadius: 2,
-          background: 'white',
+          background: "white",
         }}
       >
         <Grid container spacing={3}>
@@ -161,11 +195,26 @@ const Options = ({ children }) => {
               variant="outlined"
               margin="normal"
               InputProps={{
-                sx: { borderRadius: 1.5 }
+                sx: { borderRadius: 1.5 },
               }}
             />
-            <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
-              <Typography variant="body2" color="text.secondary" sx={{ mr: 1, flexGrow: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                mt: 2,
+              }}
+            >
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  mr: 1,
+                  flexGrow: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
                 ID: {me}
               </Typography>
               <Tooltip title="Copy your ID">
@@ -175,7 +224,7 @@ const Options = ({ children }) => {
               </Tooltip>
             </Box>
           </Grid>
-          
+
           <Grid item xs={12} md={6}>
             <Typography variant="h6" gutterBottom color="primary">
               Make a Call
@@ -188,10 +237,11 @@ const Options = ({ children }) => {
               variant="outlined"
               margin="normal"
               InputProps={{
-                sx: { borderRadius: 1.5 }
+                sx: { borderRadius: 1.5 },
               }}
             />
-            {!callAccepted && !callEnded && (
+            {/* Show call button when not in an active call */}
+            {(!callAccepted || callEnded) && (
               <Button
                 variant="contained"
                 startIcon={<Call />}
@@ -202,27 +252,29 @@ const Options = ({ children }) => {
                     alert("Please enter a valid ID to call.");
                     return;
                   }
+                  if (idToCall === me) {
+                    alert("You cannot call yourself.");
+                    return;
+                  }
                   callUser(idToCall);
                 }}
-                disabled={!idToCall}
+                disabled={!idToCall || idToCall === me}
               >
                 Call
               </Button>
             )}
           </Grid>
         </Grid>
-        
-        <Box sx={{ mt: 3 }}>
-          {children}
-        </Box>
+
+        <Box sx={{ mt: 3 }}>{children}</Box>
       </Paper>
-      
+
       <Snackbar
         open={copied}
         autoHideDuration={3000}
         onClose={() => setCopied(false)}
       >
-        <Alert severity="success" sx={{ width: '100%' }}>
+        <Alert severity="success" onClose={() => setCopied(false)}>
           ID copied to clipboard!
         </Alert>
       </Snackbar>
