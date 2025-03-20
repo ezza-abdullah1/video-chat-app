@@ -17,6 +17,7 @@ const ContextProvider = ({ children }) => {
   const userVideo = useRef(null);
   const connectionRef = useRef(null);
 
+  // Initial setup - get media stream and establish socket connections
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -41,35 +42,54 @@ const ContextProvider = ({ children }) => {
       console.log("Incoming call from:", from);
       setCall({ isReceivedCall: true, from, name: callerName, signal });
     });
-    socket.on("callended", () => {
-        console.log("The other user ended the call.");
-    
-        setCall({});
-        setCallAccepted(false);
-        setCallEnded(true);
-    
-        if (userVideo.current) {
-          userVideo.current.srcObject = null; // Clear the video container
-        }
-    
-        if (connectionRef.current) {
-          connectionRef.current.destroy();
-        }
-      });
 
     return () => {
       socket.off("connect");
       socket.off("me");
       socket.off("calluser");
-      socket.off("callended");
     };
   }, []);
 
+  // Set up call ended event listener
+  useEffect(() => {
+    const handleCallEnded = () => {
+      console.log("Call ended received: The other user ended the call");
+      
+      // Clear the video element
+      if (userVideo.current) {
+        userVideo.current.srcObject = null;
+      }
+      
+      // Destroy the peer connection
+      if (connectionRef.current) {
+        connectionRef.current.destroy();
+        connectionRef.current = null;
+      }
+      
+      // Reset call state
+      setCall({});
+      setCallAccepted(false);
+      setCallEnded(true);
+      
+      // Reset call ended after a delay
+      setTimeout(() => {
+        setCallEnded(false);
+      }, 1000);
+    };
+    
+    socket.on("callended", handleCallEnded);
+    
+    return () => {
+      socket.off("callended", handleCallEnded);
+    };
+  }, []);
+
+  // Ensure video ref is updated with stream
   useEffect(() => {
     if (stream && myVideo.current) {
       myVideo.current.srcObject = stream;
     }
-  }, [stream]);
+  }, [stream, myVideo]);
 
   const answerCall = () => {
     if (!call.signal) {
@@ -79,101 +99,138 @@ const ContextProvider = ({ children }) => {
     console.log("Answering call from:", call.from);
   
     setCallAccepted(true);
+    setCallEnded(false);
+    
     const peer = new Peer({ initiator: false, trickle: false, stream });
   
     peer.on("signal", (data) => {
-      console.log("Sending answer signal:", data);
-      socket.emit("answercall", { signal: data, to: call.from, name }); // Send correct callee name
+      socket.emit("answercall", { signal: data, to: call.from, name });
     });
   
     peer.on("stream", (currentStream) => {
-      console.log("Receiving remote stream");
+      console.log("Received remote stream");
       if (userVideo.current) {
         userVideo.current.srcObject = currentStream;
       }
     });
+    
+    // Handle peer close/destruction
+    peer.on("close", () => {
+      console.log("Peer connection closed");
+      handlePeerDisconnect();
+    });
+    
+    peer.on("error", (err) => {
+      console.error("Peer error:", err);
+      handlePeerDisconnect();
+    });
   
-    peer.signal(call.signal); // Apply the caller’s signal
+    peer.signal(call.signal);
     connectionRef.current = peer;
   };
   
   const callUser = (id) => {
     console.log("Calling user with ID:", id);
-  
+    
+    // Clean up any existing call state
+    if (connectionRef.current) {
+      connectionRef.current.destroy();
+      connectionRef.current = null;
+    }
+    
+    setCallEnded(false);
+    
     const peer = new Peer({ initiator: true, trickle: false, stream });
   
     peer.on("signal", (data) => {
-      if (!data) {
-        console.error("Signal data is undefined! Peer may not be initialized correctly.");
-        return;
-      }
-      console.log("Emitting calluser event with signal data:", data);
-      socket.emit("calluser", { userToCall: id, signalData: data, from: me, name }); // Send caller's name
+      socket.emit("calluser", { 
+        userToCall: id, 
+        signalData: data, 
+        from: me, 
+        name 
+      });
     });
   
     peer.on("stream", (currentStream) => {
-      console.log("Receiving remote stream");
       if (userVideo.current) {
         userVideo.current.srcObject = currentStream;
       }
     });
-  
-    // Receive call accepted event with correct callee name
+    
+    // Handle peer close/destruction
+    peer.on("close", () => {
+      console.log("Peer connection closed");
+      handlePeerDisconnect();
+    });
+    
+    peer.on("error", (err) => {
+      console.error("Peer error:", err);
+      handlePeerDisconnect();
+    });
+    
+    // Remove any previous listener before adding a new one
+    socket.off("callaccepted");
+    
     socket.on("callaccepted", ({ signal, name: calleeName }) => {
-      console.log("Call accepted by:", calleeName); // Debugging log
+      console.log("Call accepted by:", calleeName);
       setCallAccepted(true);
-      setCall((prev) => ({ ...prev, name: calleeName })); // Update callee name
+      setCallEnded(false);
+      setCall((prev) => ({ ...prev, name: calleeName }));
       peer.signal(signal);
     });
   
     connectionRef.current = peer;
   };
   
-
+  // Handle peer disconnect - similar to call ended but triggered by connection issues
+  const handlePeerDisconnect = () => {
+    console.log("Peer disconnected");
+    
+    // Clear video
+    if (userVideo.current) {
+      userVideo.current.srcObject = null;
+    }
+    
+    // Reset call state
+    setCallAccepted(false);
+    setCallEnded(true);
+    setCall({});
+    
+    // Reset connection ref
+    connectionRef.current = null;
+    
+    // Reset call ended state after delay
+    setTimeout(() => {
+      setCallEnded(false);
+    }, 1000);
+  };
+  
   const leaveCall = () => {
     setCallEnded(true);
   
-    // Emit event to notify the other user
+    // Notify other user that call is ending
     socket.emit("callended");
   
+    // Destroy peer connection
     if (connectionRef.current) {
       connectionRef.current.destroy();
+      connectionRef.current = null;
     }
   
-    // Reset state and clear video containers
+    // Reset call state
     setCall({});
     setCallAccepted(false);
-    setStream(null);
-  
+    
+    // Clear remote video
     if (userVideo.current) {
-      userVideo.current.srcObject = null; // Remove video feed from UI
+      userVideo.current.srcObject = null;
     }
-  
-    window.location.reload();
+    
+    // Reset call ended state after delay to allow new calls
+    setTimeout(() => {
+      setCallEnded(false);
+    }, 1000);
   };
-  
-  useEffect(() => {
-    // Handle when another user hangs up
-    socket.on("callended", () => {
-      console.log("The other user ended the call.");
-  
-      setCall({});
-      setCallAccepted(false);
-      setCallEnded(true);
-  
-      if (userVideo.current) {
-        userVideo.current.srcObject = null; // Clear the video container
-      }
-  
-      if (connectionRef.current) {
-        connectionRef.current.destroy();
-      }
-    });
-  
-    return () => {
-      socket.off("callended");
-    };
-  }, []);
   
   return (
     <SocketContext.Provider

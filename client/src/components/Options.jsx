@@ -1,126 +1,284 @@
-import React, { useState, useContext } from "react";
+import React, { useState, useContext, useEffect } from "react";
 import {
   Button,
   TextField,
   Grid,
-  Typography,
-  Container,
   Paper,
+  Box,
+  IconButton,
+  Tooltip,
+  Typography,
+  useTheme,
+  Snackbar,
+  Alert,
 } from "@mui/material";
-import { CopyToClipboard } from "react-copy-to-clipboard";
-import { Assignment, Phone, PhoneDisabled } from "@mui/icons-material";
-import { styled, useTheme } from "@mui/material/styles";
+import {
+  ContentCopy,
+  Call,
+  CallEnd,
+  Videocam,
+  VideocamOff,
+  Mic,
+  MicOff,
+  Settings,
+} from "@mui/icons-material";
 
 import { SocketContext } from "../SocketContext";
 
-// Styled Components using MUI v5
-const Root = styled("form")({
-  display: "flex",
-  flexDirection: "column",
-});
-
-const PaperStyled = styled(Paper)({
-  padding: "10px 20px",
-  border: "2px solid black",
-});
-
 const Options = ({ children }) => {
-  const { me, callAccepted, name, setName, callEnded, leaveCall, callUser } =
-    useContext(SocketContext);
+  const {
+    me,
+    callAccepted,
+    name,
+    setName,
+    callEnded,
+    leaveCall,
+    callUser,
+    stream,
+  } = useContext(SocketContext);
+
   const [idToCall, setIdToCall] = useState("");
-  const theme = useTheme(); // Get theme for breakpoints
+  const [copied, setCopied] = useState(false);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+
+  const theme = useTheme();
+
+  const handleCopyClick = () => {
+    navigator.clipboard.writeText(me);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+  };
+
+  const toggleVideo = () => {
+    if (stream) {
+      stream.getVideoTracks().forEach((track) => {
+        track.enabled = !videoEnabled;
+      });
+      setVideoEnabled(!videoEnabled);
+    }
+  };
+
+  const toggleAudio = () => {
+    if (stream) {
+      stream.getAudioTracks().forEach((track) => {
+        track.enabled = !audioEnabled;
+      });
+      setAudioEnabled(!audioEnabled);
+    }
+  };
+
+  // Reset media controls when stream changes
+  useEffect(() => {
+    if (stream) {
+      const videoTrack = stream.getVideoTracks()[0];
+      const audioTrack = stream.getAudioTracks()[0];
+
+      if (videoTrack) {
+        setVideoEnabled(videoTrack.enabled);
+      }
+
+      if (audioTrack) {
+        setAudioEnabled(audioTrack.enabled);
+      }
+    }
+  }, [stream]);
 
   return (
-    <Container
-      sx={{
-        width: "600px",
-        margin: "35px 0",
-        padding: 0,
-        [theme.breakpoints.down("xs")]: { width: "80%" },
-      }}
-    >
-      <PaperStyled elevation={10}>
-        <Root noValidate autoComplete="off">
-          <Grid
-            container
-            sx={{
-              width: "100%",
-              [theme.breakpoints.down("xs")]: { flexDirection: "column" },
-            }}
-          >
-            {/* Account Info Section */}
-            <Grid item xs={12} md={6} sx={{ padding: 2 }}>
-              <Typography gutterBottom variant="h6">
-                Account Info
+    <Box sx={{ width: "100%", position: "relative" }}>
+      {/* Controls for ongoing call */}
+      {callAccepted && !callEnded && (
+        <Paper
+          elevation={1}
+          sx={{
+            p: 2,
+            mb: 2,
+            borderRadius: 4,
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            backgroundColor: "rgba(255, 255, 255, 0.9)",
+          }}
+        >
+          <Box sx={{ display: "flex", gap: 1 }}>
+            <Tooltip title={audioEnabled ? "Mute" : "Unmute"}>
+              <IconButton
+                onClick={toggleAudio}
+                sx={{
+                  backgroundColor: audioEnabled
+                    ? "rgba(0,0,0,0.05)"
+                    : theme.palette.secondary.main,
+                  color: audioEnabled ? "inherit" : "white",
+                  "&:hover": {
+                    backgroundColor: audioEnabled
+                      ? "rgba(0,0,0,0.1)"
+                      : theme.palette.secondary.dark,
+                  },
+                }}
+              >
+                {audioEnabled ? <Mic /> : <MicOff />}
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip
+              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
+            >
+              <IconButton
+                onClick={toggleVideo}
+                sx={{
+                  backgroundColor: videoEnabled
+                    ? "rgba(0,0,0,0.05)"
+                    : theme.palette.secondary.main,
+                  color: videoEnabled ? "inherit" : "white",
+                  "&:hover": {
+                    backgroundColor: videoEnabled
+                      ? "rgba(0,0,0,0.1)"
+                      : theme.palette.secondary.dark,
+                  },
+                }}
+              >
+                {videoEnabled ? <Videocam /> : <VideocamOff />}
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="End call">
+              <IconButton
+                onClick={leaveCall}
+                sx={{
+                  backgroundColor: theme.palette.secondary.main,
+                  color: "white",
+                  "&:hover": {
+                    backgroundColor: theme.palette.secondary.dark,
+                  },
+                }}
+              >
+                <CallEnd />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Settings">
+              <IconButton
+                sx={{
+                  backgroundColor: "rgba(0,0,0,0.05)",
+                  "&:hover": {
+                    backgroundColor: "rgba(0,0,0,0.1)",
+                  },
+                }}
+              >
+                <Settings />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Paper>
+      )}
+
+      {/* Call setup form */}
+      <Paper
+        elevation={1}
+        sx={{
+          p: 3,
+          borderRadius: 2,
+          background: "white",
+        }}
+      >
+        <Grid container spacing={3}>
+          {/* Your Info */}
+          <Grid item xs={12} md={6}>
+            <Typography variant="h6" gutterBottom color="primary">
+              Your Info
+            </Typography>
+            <TextField
+              label="Your Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              fullWidth
+              variant="outlined"
+              margin="normal"
+              InputProps={{
+                sx: { borderRadius: 1.5 },
+              }}
+            />
+            <Box
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                mt: 2,
+              }}
+            >
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  mr: 1,
+                  flexGrow: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                ID: {me}
               </Typography>
-              <TextField
-                label="Name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                fullWidth
-              />
-              {console.log("Current ID (me):", me)}
-<CopyToClipboard text={me} onCopy={() => console.log("Copied:", me)}>
-  <Button
-    variant="contained"
-    color="primary"
-    fullWidth
-    sx={{ mt: 2 }}
-    startIcon={<Assignment fontSize="large" />}
-  >
-    Copy Your ID
-  </Button>
-</CopyToClipboard>
-
-            </Grid>
-
-            {/* Call Section */}
-            <Grid item xs={12} md={6} sx={{ padding: 2 }}>
-              <Typography gutterBottom variant="h6">
-                Make a call
-              </Typography>
-              <TextField
-                label="ID to call"
-                value={idToCall}
-                onChange={(e) => setIdToCall(e.target.value)}
-                fullWidth
-              />
-              {callAccepted && !callEnded ? (
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  startIcon={<PhoneDisabled fontSize="large" />}
-                  fullWidth
-                  sx={{ mt: 2 }}
-                  onClick={leaveCall}
-                >
-                  Hang Up
-                </Button>
-              ) : (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<Phone fontSize="large" />}
-                  fullWidth
-                  sx={{ mt: 2 }}
-
-                  onClick={() => {
-                    console.log("Calling ID:", idToCall);
-                    if (!idToCall) {
-                        alert("Please enter a valid ID to call.");
-                        return;
-                      }
-                    callUser(idToCall)}}
-                >
-                  Call
-                </Button>
-              )}
-            </Grid>
+              <Tooltip title="Copy your ID">
+                <IconButton onClick={handleCopyClick} color="primary" size="small">
+                  <ContentCopy />
+                </IconButton>
+              </Tooltip>
+            </Box>
           </Grid>
-        </Root>
-        {children}
-      </PaperStyled>
-    </Container>
+
+          <Grid item xs={12} md={6}>
+            <Typography variant="h6" gutterBottom color="primary">
+              Make a Call
+            </Typography>
+            <TextField
+              label="ID to Call"
+              value={idToCall}
+              onChange={(e) => setIdToCall(e.target.value)}
+              fullWidth
+              variant="outlined"
+              margin="normal"
+              InputProps={{
+                sx: { borderRadius: 1.5 },
+              }}
+            />
+            {/* Show call button when not in an active call */}
+            {(!callAccepted || callEnded) && (
+              <Button
+                variant="contained"
+                startIcon={<Call />}
+                fullWidth
+                sx={{ mt: 2 }}
+                onClick={() => {
+                  if (!idToCall) {
+                    alert("Please enter a valid ID to call.");
+                    return;
+                  }
+                  if (idToCall === me) {
+                    alert("You cannot call yourself.");
+                    return;
+                  }
+                  callUser(idToCall);
+                }}
+                disabled={!idToCall || idToCall === me}
+              >
+                Call
+              </Button>
+            )}
+          </Grid>
+        </Grid>
+
+        <Box sx={{ mt: 3 }}>{children}</Box>
+      </Paper>
+
+      <Snackbar
+        open={copied}
+        autoHideDuration={3000}
+        onClose={() => setCopied(false)}
+      >
+        <Alert severity="success" onClose={() => setCopied(false)}>
+          ID copied to clipboard!
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 };
 
