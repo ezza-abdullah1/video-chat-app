@@ -29,24 +29,36 @@ const Options = () => {
     setTimeout(() => setCopied(false), 3000);
   };
 
+  // Toggle video by reading the current track state
   const toggleVideo = () => {
     if (stream) {
-      stream.getVideoTracks().forEach((track) => {
-        track.enabled = !videoEnabled;
-      });
-      setVideoEnabled(!videoEnabled);
+      const videoTracks = stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        // Derive the new enabled value from the current track property
+        const newVideoEnabled = !videoTracks[0].enabled;
+        videoTracks.forEach((track) => {
+          track.enabled = newVideoEnabled;
+        });
+        setVideoEnabled(newVideoEnabled);
+      }
     }
   };
 
+  // Toggle audio similarly by reading the current track state
   const toggleAudio = () => {
     if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !audioEnabled;
-      });
-      setAudioEnabled(!audioEnabled);
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const newAudioEnabled = !audioTracks[0].enabled;
+        audioTracks.forEach((track) => {
+          track.enabled = newAudioEnabled;
+        });
+        setAudioEnabled(newAudioEnabled);
+      }
     }
   };
 
+  // Set the initial state based on the current stream properties
   useEffect(() => {
     if (stream) {
       const videoTrack = stream.getVideoTracks()[0];
