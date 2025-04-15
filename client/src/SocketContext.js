@@ -10,7 +10,8 @@ const ContextProvider = ({ children }) => {
   const [me, setMe] = useState("");
   const [peers, setPeers] = useState([]); // List of { peerID, peer, name }
   const [name, setName] = useState("");
-  const [roomId, setRoomId] = useState("default-room");
+  // Set initial roomId to empty so the user must provide one
+  const [roomId, setRoomId] = useState("");
 
   const myVideo = useRef();
   const peersRef = useRef([]);
@@ -26,7 +27,6 @@ const ContextProvider = ({ children }) => {
         if (myVideo.current) {
           myVideo.current.srcObject = currentStream;
         }
-        // Removed joinRoom call here to avoid duplicate joins.
       })
       .catch((error) => console.error("Error accessing media devices:", error));
 
@@ -180,10 +180,10 @@ const ContextProvider = ({ children }) => {
 
   // Auto-join room if name and stream are available (only once thanks to joinedRef)
   useEffect(() => {
-    if (name && stream) {
+    if (name && stream && roomId) {
       joinRoom();
     }
-  }, [name, stream]);
+  }, [name, stream, roomId]);
 
   // Clean up on component unmount
   useEffect(() => {
@@ -207,7 +207,6 @@ const ContextProvider = ({ children }) => {
       socket.disconnect();
     }
     setName("");
-    // Reset join flag so that user can join a new room later if needed
     joinedRef.current = false;
   };
 

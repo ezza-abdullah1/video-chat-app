@@ -1,4 +1,4 @@
-import React, { useContext } from "react";
+import React, { useContext, useState } from "react";
 import {
   Typography,
   AppBar,
@@ -9,6 +9,9 @@ import {
   ThemeProvider,
   createTheme,
   TextField,
+  Button,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import VideoPlayer from "./components/VideoPlayer";
 import Options from "./components/Options";
@@ -37,12 +40,21 @@ const theme = createTheme({
   },
 });
 
+// Utility function to generate a random room ID (8-character alphanumeric)
+const generateRoomId = () => {
+  return Math.random().toString(36).substring(2, 10).toUpperCase();
+};
+
 const App = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  // Local state for join form inputs
+  const [inputName, setInputName] = useState("");
+  const [inputRoomId, setInputRoomId] = useState("");
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
   const { name, setName, roomId, setRoomId } = useContext(SocketContext);
 
-  // If the user hasn’t provided a name, show a join meeting form.
-  if (!name) {
+  // If global name and roomId are not set, show join meeting form.
+  if (!name || !roomId) {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
@@ -50,22 +62,70 @@ const App = () => {
           <Typography variant="h4" align="center" gutterBottom>
             Join Meeting
           </Typography>
-          <Box component="form" sx={{ mt: 3 }}>
+          <Box
+            component="form"
+            sx={{
+              mt: 3,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+            }}
+          >
             <TextField
               label="Your Name"
               fullWidth
               required
-              onChange={(e) => setName(e.target.value)}
+              value={inputName}
+              onChange={(e) => setInputName(e.target.value)}
             />
             <TextField
               label="Room ID"
               fullWidth
-              required
-              sx={{ mt: 2 }}
-              onChange={(e) => setRoomId(e.target.value)}
-              defaultValue={roomId}
+              value={inputRoomId}
+              placeholder="Enter room ID or create a new room"
+              onChange={(e) => setInputRoomId(e.target.value)}
             />
+            <Box sx={{ display: "flex", gap: 2 }}>
+              <Button
+                variant="contained"
+                onClick={() => {
+                  // If room ID is empty, create one.
+                  if (!inputRoomId.trim()) {
+                    const newRoomId = generateRoomId();
+                    setInputRoomId(newRoomId);
+                    setSnackbarOpen(true);
+                  }
+                }}
+              >
+                Create Room
+              </Button>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => {
+                  // Only join if both fields are non-empty.
+                  if (inputName.trim() && inputRoomId.trim()) {
+                    setName(inputName.trim());
+                    setRoomId(inputRoomId.trim());
+                  }
+                }}
+              >
+                Join Meeting
+              </Button>
+            </Box>
           </Box>
+          <Snackbar
+            open={snackbarOpen}
+            autoHideDuration={3000}
+            onClose={() => setSnackbarOpen(false)}
+          >
+            <Alert
+              onClose={() => setSnackbarOpen(false)}
+              severity="success"
+            >
+              Room created with ID: {inputRoomId}
+            </Alert>
+          </Snackbar>
         </Container>
       </ThemeProvider>
     );
