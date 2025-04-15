@@ -1,4 +1,4 @@
-const express = require("express");
+const express = require("express"); 
 const http = require("http");
 const cors = require("cors");
 const socketIo = require("socket.io");
@@ -25,6 +25,7 @@ app.get("/", (req, res) => {
   res.send("Server is running");
 });
 
+// When a user explicitly leaves the room
 io.on("connection", (socket) => {
   console.log("New user connected:", socket.id);
 
@@ -44,6 +45,16 @@ io.on("connection", (socket) => {
 
     // Notify everyone else in the room that a new user joined
     socket.to(roomId).emit("user-connected", { callerId: socket.id, callerName: name });
+  });
+
+  // Handle a user leaving explicitly
+  socket.on("leave-room", () => {
+    // Broadcast a user-disconnected event so others remove this peer’s video tile
+    for (const roomId of socket.rooms) {
+      if (roomId !== socket.id) {
+        socket.to(roomId).emit("user-disconnected", socket.id);
+      }
+    }
   });
 
   // When a client (initiator) sends a signal to a user

@@ -10,12 +10,14 @@ const ContextProvider = ({ children }) => {
   const [me, setMe] = useState("");
   const [peers, setPeers] = useState([]); // List of { peerID, peer, name }
   const [name, setName] = useState("");
-  const [roomId, setRoomId] = useState("default-room"); // default room (can be modified)
+  const [roomId, setRoomId] = useState("default-room");
 
   const myVideo = useRef();
   const peersRef = useRef([]);
+  // Ref used to guard against duplicate join attempts
+  const joinedRef = useRef(false);
 
-  // Get user media. Once the user’s name is set, join the room.
+  // Get user media and set the local stream
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -24,27 +26,58 @@ const ContextProvider = ({ children }) => {
         if (myVideo.current) {
           myVideo.current.srcObject = currentStream;
         }
-        // If the user has already provided a name, join room
-        if (name) {
-          joinRoom();
-        }
+        // Removed joinRoom call here to avoid duplicate joins.
       })
       .catch((error) => console.error("Error accessing media devices:", error));
+
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
   }, [name]);
 
+  // Set up our own socket id
   useEffect(() => {
-    // Save our own socket id
     socket.on("me", (id) => setMe(id));
     return () => {
       socket.off("me");
     };
   }, []);
 
-  // Join the meeting room once a name is provided
-  const joinRoom = () => {
-    socket.emit("join-room", { roomId, name });
+  // Helper function to clean up all peer connections
+  const cleanupConnections = () => {
+    peersRef.current.forEach(({ peer }) => {
+      if (peer) {
+        peer.destroy();
+      }
+    });
+    peersRef.current = [];
+    setPeers([]);
+  };
 
-    socket.on("all-users", (users) => {
+  // Join the meeting room (only emit join event if not already joined)
+  const joinRoom = () => {
+    // Guard: don't join twice
+    if (joinedRef.current) return;
+    joinedRef.current = true;
+
+    cleanupConnections();
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    socket.emit("join-room", { roomId, name });
+  };
+
+  // Register socket event listeners once when stream and name are available
+  useEffect(() => {
+    if (!stream || !name) return;
+
+    // Listener for receiving the list of all users in the room (for initiator)
+    const handleAllUsers = (users) => {
+      console.log("Received all users:", users);
       const peersFromUsers = [];
       users.forEach((user) => {
         const peer = new Peer({
@@ -64,10 +97,13 @@ const ContextProvider = ({ children }) => {
         peersFromUsers.push({ peerID: user.id, peer, name: user.name });
       });
       setPeers(peersFromUsers);
-    });
+    };
 
-    // When another user joins and sends their signal
-    socket.on("user-connected", (payload) => {
+    socket.on("all-users", handleAllUsers);
+
+    // Listener for new users connecting (for non-initiators)
+    const handleUserConnected = (payload) => {
+      console.log("User connected:", payload.callerId);
       const peer = new Peer({
         initiator: false,
         trickle: false,
@@ -77,43 +113,102 @@ const ContextProvider = ({ children }) => {
         socket.emit("returning-signal", { signal, callerId: payload.callerId });
       });
       peersRef.current.push({ peerID: payload.callerId, peer, name: payload.callerName });
-      setPeers((users) => [...users, { peerID: payload.callerId, peer, name: payload.callerName }]);
-    });
+      setPeers((prev) => [
+        ...prev,
+        { peerID: payload.callerId, peer, name: payload.callerName },
+      ]);
+    };
 
-    // Signal from an initiator for this new user (receiver handling)
-    socket.on("user-joined", (payload) => {
+    socket.on("user-connected", handleUserConnected);
+
+    // Listener for initiator receiving a signal from a non-initiator
+    const handleUserJoined = (payload) => {
+      console.log("Received signal from user:", payload.callerId);
       const item = peersRef.current.find((p) => p.peerID === payload.callerId);
       if (item) {
-        item.peer.signal(payload.signal);
+        try {
+          item.peer.signal(payload.signal);
+        } catch (err) {
+          console.error("Error during peer.signal (user-joined):", err);
+        }
       }
-    });
+    };
 
-    // When a receiver returns a signal to an initiator
-    socket.on("receiving-returned-signal", (payload) => {
+    socket.on("user-joined", handleUserJoined);
+
+    // Listener for receiving returned signal (for non-initiators)
+    const handleReceivingReturnedSignal = (payload) => {
+      console.log("Received returned signal from:", payload.id);
       const item = peersRef.current.find((p) => p.peerID === payload.id);
       if (item) {
-        item.peer.signal(payload.signal);
+        try {
+          item.peer.signal(payload.signal);
+        } catch (err) {
+          console.error("Error during peer.signal (receiving-returned-signal):", err);
+        }
       }
-    });
+    };
 
-    // When a user disconnects, remove their peer
-    socket.on("user-disconnected", (id) => {
+    socket.on("receiving-returned-signal", handleReceivingReturnedSignal);
+
+    // Cleanup these listeners when the component unmounts or when stream/name change
+    return () => {
+      socket.off("all-users", handleAllUsers);
+      socket.off("user-connected", handleUserConnected);
+      socket.off("user-joined", handleUserJoined);
+      socket.off("receiving-returned-signal", handleReceivingReturnedSignal);
+    };
+  }, [stream, name]);
+
+  // Listen for "user-disconnected" events and remove the peer from the UI
+  useEffect(() => {
+    const handleUserDisconnected = (id) => {
+      console.log("User disconnected with ID:", id);
       const peerObj = peersRef.current.find((p) => p.peerID === id);
-      if (peerObj) {
+      if (peerObj && peerObj.peer) {
         peerObj.peer.destroy();
       }
       peersRef.current = peersRef.current.filter((p) => p.peerID !== id);
-      setPeers((users) => users.filter((p) => p.peerID !== id));
-    });
-  };
+      setPeers((prev) => prev.filter((p) => p.peerID !== id));
+    };
 
-  // Leave the meeting and clean up connections
+    socket.on("user-disconnected", handleUserDisconnected);
+    return () => {
+      socket.off("user-disconnected", handleUserDisconnected);
+    };
+  }, []);
+
+  // Auto-join room if name and stream are available (only once thanks to joinedRef)
+  useEffect(() => {
+    if (name && stream) {
+      joinRoom();
+    }
+  }, [name, stream]);
+
+  // Clean up on component unmount
+  useEffect(() => {
+    return () => {
+      cleanupConnections();
+      socket.off("all-users");
+      socket.off("user-connected");
+      socket.off("user-joined");
+      socket.off("receiving-returned-signal");
+      socket.off("user-disconnected");
+      socket.disconnect();
+    };
+  }, []);
+
+  // Updated leaveRoom function
   const leaveRoom = () => {
-    peersRef.current.forEach((p) => p.peer.destroy());
-    peersRef.current = [];
-    setPeers([]);
-    socket.disconnect();
-    window.location.reload();
+    console.log("Leaving room, cleaning up connections...");
+    socket.emit("leave-room");
+    cleanupConnections();
+    if (socket.connected) {
+      socket.disconnect();
+    }
+    setName("");
+    // Reset join flag so that user can join a new room later if needed
+    joinedRef.current = false;
   };
 
   return (
