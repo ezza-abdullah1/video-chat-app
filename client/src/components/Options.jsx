@@ -1,48 +1,27 @@
 import React, { useState, useContext, useEffect } from "react";
 import {
-  Button,
-  TextField,
-  Grid,
-  Paper,
   Box,
+  Paper,
   IconButton,
   Tooltip,
-  Typography,
-  useTheme,
   Snackbar,
   Alert,
 } from "@mui/material";
 import {
   ContentCopy,
-  Call,
-  CallEnd,
   Videocam,
   VideocamOff,
   Mic,
   MicOff,
-  Settings,
+  ExitToApp,
 } from "@mui/icons-material";
-
 import { SocketContext } from "../SocketContext";
 
-const Options = ({ children }) => {
-  const {
-    me,
-    callAccepted,
-    name,
-    setName,
-    callEnded,
-    leaveCall,
-    callUser,
-    stream,
-  } = useContext(SocketContext);
-
-  const [idToCall, setIdToCall] = useState("");
+const Options = () => {
+  const { me, stream, leaveRoom } = useContext(SocketContext);
   const [copied, setCopied] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-
-  const theme = useTheme();
 
   const handleCopyClick = () => {
     navigator.clipboard.writeText(me);
@@ -50,223 +29,96 @@ const Options = ({ children }) => {
     setTimeout(() => setCopied(false), 3000);
   };
 
+  // Toggle video by reading the current track state
   const toggleVideo = () => {
     if (stream) {
-      stream.getVideoTracks().forEach((track) => {
-        track.enabled = !videoEnabled;
-      });
-      setVideoEnabled(!videoEnabled);
+      const videoTracks = stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        // Derive the new enabled value from the current track property
+        const newVideoEnabled = !videoTracks[0].enabled;
+        videoTracks.forEach((track) => {
+          track.enabled = newVideoEnabled;
+        });
+        setVideoEnabled(newVideoEnabled);
+      }
     }
   };
 
+  // Toggle audio similarly by reading the current track state
   const toggleAudio = () => {
     if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !audioEnabled;
-      });
-      setAudioEnabled(!audioEnabled);
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const newAudioEnabled = !audioTracks[0].enabled;
+        audioTracks.forEach((track) => {
+          track.enabled = newAudioEnabled;
+        });
+        setAudioEnabled(newAudioEnabled);
+      }
     }
   };
 
-  // Reset media controls when stream changes
+  // Set the initial state based on the current stream properties
   useEffect(() => {
     if (stream) {
       const videoTrack = stream.getVideoTracks()[0];
       const audioTrack = stream.getAudioTracks()[0];
-
-      if (videoTrack) {
-        setVideoEnabled(videoTrack.enabled);
-      }
-
-      if (audioTrack) {
-        setAudioEnabled(audioTrack.enabled);
-      }
+      if (videoTrack) setVideoEnabled(videoTrack.enabled);
+      if (audioTrack) setAudioEnabled(audioTrack.enabled);
     }
   }, [stream]);
 
   return (
     <Box sx={{ width: "100%", position: "relative" }}>
-      {/* Controls for ongoing call */}
-      {callAccepted && !callEnded && (
-        <Paper
-          elevation={1}
-          sx={{
-            p: 2,
-            mb: 2,
-            borderRadius: 4,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            backgroundColor: "rgba(255, 255, 255, 0.9)",
-          }}
-        >
-          <Box sx={{ display: "flex", gap: 1 }}>
-            <Tooltip title={audioEnabled ? "Mute" : "Unmute"}>
-              <IconButton
-                onClick={toggleAudio}
-                sx={{
-                  backgroundColor: audioEnabled
-                    ? "rgba(0,0,0,0.05)"
-                    : theme.palette.secondary.main,
-                  color: audioEnabled ? "inherit" : "white",
-                  "&:hover": {
-                    backgroundColor: audioEnabled
-                      ? "rgba(0,0,0,0.1)"
-                      : theme.palette.secondary.dark,
-                  },
-                }}
-              >
-                {audioEnabled ? <Mic /> : <MicOff />}
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip
-              title={videoEnabled ? "Turn off camera" : "Turn on camera"}
-            >
-              <IconButton
-                onClick={toggleVideo}
-                sx={{
-                  backgroundColor: videoEnabled
-                    ? "rgba(0,0,0,0.05)"
-                    : theme.palette.secondary.main,
-                  color: videoEnabled ? "inherit" : "white",
-                  "&:hover": {
-                    backgroundColor: videoEnabled
-                      ? "rgba(0,0,0,0.1)"
-                      : theme.palette.secondary.dark,
-                  },
-                }}
-              >
-                {videoEnabled ? <Videocam /> : <VideocamOff />}
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="End call">
-              <IconButton
-                onClick={leaveCall}
-                sx={{
-                  backgroundColor: theme.palette.secondary.main,
-                  color: "white",
-                  "&:hover": {
-                    backgroundColor: theme.palette.secondary.dark,
-                  },
-                }}
-              >
-                <CallEnd />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Settings">
-              <IconButton
-                sx={{
-                  backgroundColor: "rgba(0,0,0,0.05)",
-                  "&:hover": {
-                    backgroundColor: "rgba(0,0,0,0.1)",
-                  },
-                }}
-              >
-                <Settings />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Paper>
-      )}
-
-      {/* Call setup form */}
       <Paper
         elevation={1}
         sx={{
-          p: 3,
-          borderRadius: 2,
-          background: "white",
+          p: 2,
+          mb: 2,
+          borderRadius: 4,
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          backgroundColor: "rgba(255, 255, 255, 0.9)",
         }}
       >
-        <Grid container spacing={3}>
-          {/* Your Info */}
-          <Grid item xs={12} md={6}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Your Info
-            </Typography>
-            <TextField
-              label="Your Name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              fullWidth
-              variant="outlined"
-              margin="normal"
-              InputProps={{
-                sx: { borderRadius: 1.5 },
-              }}
-            />
-            <Box
+        <Box sx={{ display: "flex", gap: 1 }}>
+          <Tooltip title={audioEnabled ? "Mute" : "Unmute"}>
+            <IconButton
+              onClick={toggleAudio}
               sx={{
-                display: "flex",
-                alignItems: "center",
-                mt: 2,
+                backgroundColor: audioEnabled ? "rgba(0,0,0,0.05)" : "red",
+                color: audioEnabled ? "inherit" : "white",
               }}
             >
-              <Typography
-                variant="body2"
-                color="text.secondary"
-                sx={{
-                  mr: 1,
-                  flexGrow: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                ID: {me}
-              </Typography>
-              <Tooltip title="Copy your ID">
-                <IconButton onClick={handleCopyClick} color="primary" size="small">
-                  <ContentCopy />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Grid>
-
-          <Grid item xs={12} md={6}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Make a Call
-            </Typography>
-            <TextField
-              label="ID to Call"
-              value={idToCall}
-              onChange={(e) => setIdToCall(e.target.value)}
-              fullWidth
-              variant="outlined"
-              margin="normal"
-              InputProps={{
-                sx: { borderRadius: 1.5 },
+              {audioEnabled ? <Mic /> : <MicOff />}
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={videoEnabled ? "Turn off camera" : "Turn on camera"}>
+            <IconButton
+              onClick={toggleVideo}
+              sx={{
+                backgroundColor: videoEnabled ? "rgba(0,0,0,0.05)" : "red",
+                color: videoEnabled ? "inherit" : "white",
               }}
-            />
-            {/* Show call button when not in an active call */}
-            {(!callAccepted || callEnded) && (
-              <Button
-                variant="contained"
-                startIcon={<Call />}
-                fullWidth
-                sx={{ mt: 2 }}
-                onClick={() => {
-                  if (!idToCall) {
-                    alert("Please enter a valid ID to call.");
-                    return;
-                  }
-                  if (idToCall === me) {
-                    alert("You cannot call yourself.");
-                    return;
-                  }
-                  callUser(idToCall);
-                }}
-                disabled={!idToCall || idToCall === me}
-              >
-                Call
-              </Button>
-            )}
-          </Grid>
-        </Grid>
-
-        <Box sx={{ mt: 3 }}>{children}</Box>
+            >
+              {videoEnabled ? <Videocam /> : <VideocamOff />}
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Leave Meeting">
+            <IconButton
+              onClick={leaveRoom}
+              sx={{ backgroundColor: "red", color: "white" }}
+            >
+              <ExitToApp />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Copy your ID">
+            <IconButton onClick={handleCopyClick} color="primary">
+              <ContentCopy />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Paper>
 
       <Snackbar

@@ -8,16 +8,17 @@ const socket = io("http://localhost:5000", { transports: ["websocket"] });
 const ContextProvider = ({ children }) => {
   const [stream, setStream] = useState(null);
   const [me, setMe] = useState("");
-  const [call, setCall] = useState({});
-  const [callAccepted, setCallAccepted] = useState(false);
-  const [callEnded, setCallEnded] = useState(false);
+  const [peers, setPeers] = useState([]); // List of { peerID, peer, name }
   const [name, setName] = useState("");
+  // Set initial roomId to empty so the user must provide one
+  const [roomId, setRoomId] = useState("");
 
-  const myVideo = useRef(null);
-  const userVideo = useRef(null);
-  const connectionRef = useRef(null);
+  const myVideo = useRef();
+  const peersRef = useRef([]);
+  // Ref used to guard against duplicate join attempts
+  const joinedRef = useRef(false);
 
-  // Initial setup - get media stream and establish socket connections
+  // Get user media and set the local stream
   useEffect(() => {
     navigator.mediaDevices
       .getUserMedia({ video: true, audio: true })
@@ -29,224 +30,198 @@ const ContextProvider = ({ children }) => {
       })
       .catch((error) => console.error("Error accessing media devices:", error));
 
-    socket.on("connect", () => {
-      console.log("Connected to server. My socket ID:", socket.id);
-    });
-
-    socket.on("me", (id) => {
-      console.log("My ID received from server:", id);
-      setMe(id);
-    });
-
-    socket.on("calluser", ({ from, name: callerName, signal }) => {
-      console.log("Incoming call from:", from);
-      setCall({ isReceivedCall: true, from, name: callerName, signal });
-    });
-
     return () => {
-      socket.off("connect");
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, [name]);
+
+  // Set up our own socket id
+  useEffect(() => {
+    socket.on("me", (id) => setMe(id));
+    return () => {
       socket.off("me");
-      socket.off("calluser");
     };
   }, []);
 
-  // Set up call ended event listener
-  useEffect(() => {
-    const handleCallEnded = () => {
-      console.log("Call ended received: The other user ended the call");
-      
-      // Clear the video element
-      if (userVideo.current) {
-        userVideo.current.srcObject = null;
-      }
-      
-      // Destroy the peer connection
-      if (connectionRef.current) {
-        connectionRef.current.destroy();
-        connectionRef.current = null;
-      }
-      
-      // Reset call state
-      setCall({});
-      setCallAccepted(false);
-      setCallEnded(true);
-      
-      // Reset call ended after a delay
-      setTimeout(() => {
-        setCallEnded(false);
-      }, 1000);
-    };
-    
-    socket.on("callended", handleCallEnded);
-    
-    return () => {
-      socket.off("callended", handleCallEnded);
-    };
-  }, []);
-
-  // Ensure video ref is updated with stream
-  useEffect(() => {
-    if (stream && myVideo.current) {
-      myVideo.current.srcObject = stream;
-    }
-  }, [stream, myVideo]);
-
-  const answerCall = () => {
-    if (!call.signal) {
-      console.error("No incoming signal to answer the call!");
-      return;
-    }
-    console.log("Answering call from:", call.from);
-  
-    setCallAccepted(true);
-    setCallEnded(false);
-    
-    const peer = new Peer({ initiator: false, trickle: false, stream });
-  
-    peer.on("signal", (data) => {
-      socket.emit("answercall", { signal: data, to: call.from, name });
-    });
-  
-    peer.on("stream", (currentStream) => {
-      console.log("Received remote stream");
-      if (userVideo.current) {
-        userVideo.current.srcObject = currentStream;
+  // Helper function to clean up all peer connections
+  const cleanupConnections = () => {
+    peersRef.current.forEach(({ peer }) => {
+      if (peer) {
+        peer.destroy();
       }
     });
-    
-    // Handle peer close/destruction
-    peer.on("close", () => {
-      console.log("Peer connection closed");
-      handlePeerDisconnect();
-    });
-    
-    peer.on("error", (err) => {
-      console.error("Peer error:", err);
-      handlePeerDisconnect();
-    });
-  
-    peer.signal(call.signal);
-    connectionRef.current = peer;
+    peersRef.current = [];
+    setPeers([]);
   };
-  
-  const callUser = (id) => {
-    console.log("Calling user with ID:", id);
-    
-    // Clean up any existing call state
-    if (connectionRef.current) {
-      connectionRef.current.destroy();
-      connectionRef.current = null;
+
+  // Join the meeting room (only emit join event if not already joined)
+  const joinRoom = () => {
+    // Guard: don't join twice
+    if (joinedRef.current) return;
+    joinedRef.current = true;
+
+    cleanupConnections();
+
+    if (!socket.connected) {
+      socket.connect();
     }
-    
-    setCallEnded(false);
-    
-    const peer = new Peer({ initiator: true, trickle: false, stream });
-  
-    peer.on("signal", (data) => {
-      socket.emit("calluser", { 
-        userToCall: id, 
-        signalData: data, 
-        from: me, 
-        name 
+
+    socket.emit("join-room", { roomId, name });
+  };
+
+  // Register socket event listeners once when stream and name are available
+  useEffect(() => {
+    if (!stream || !name) return;
+
+    // Listener for receiving the list of all users in the room (for initiator)
+    const handleAllUsers = (users) => {
+      console.log("Received all users:", users);
+      const peersFromUsers = [];
+      users.forEach((user) => {
+        const peer = new Peer({
+          initiator: true,
+          trickle: false,
+          stream,
+        });
+        peer.on("signal", (signal) => {
+          socket.emit("sending-signal", {
+            userToSignal: user.id,
+            signal,
+            callerId: socket.id,
+            callerName: name,
+          });
+        });
+        peersRef.current.push({ peerID: user.id, peer, name: user.name });
+        peersFromUsers.push({ peerID: user.id, peer, name: user.name });
       });
-    });
-  
-    peer.on("stream", (currentStream) => {
-      if (userVideo.current) {
-        userVideo.current.srcObject = currentStream;
+      setPeers(peersFromUsers);
+    };
+
+    socket.on("all-users", handleAllUsers);
+
+    // Listener for new users connecting (for non-initiators)
+    const handleUserConnected = (payload) => {
+      console.log("User connected:", payload.callerId);
+      const peer = new Peer({
+        initiator: false,
+        trickle: false,
+        stream,
+      });
+      peer.on("signal", (signal) => {
+        socket.emit("returning-signal", { signal, callerId: payload.callerId });
+      });
+      peersRef.current.push({ peerID: payload.callerId, peer, name: payload.callerName });
+      setPeers((prev) => [
+        ...prev,
+        { peerID: payload.callerId, peer, name: payload.callerName },
+      ]);
+    };
+
+    socket.on("user-connected", handleUserConnected);
+
+    // Listener for initiator receiving a signal from a non-initiator
+    const handleUserJoined = (payload) => {
+      console.log("Received signal from user:", payload.callerId);
+      const item = peersRef.current.find((p) => p.peerID === payload.callerId);
+      if (item) {
+        try {
+          item.peer.signal(payload.signal);
+        } catch (err) {
+          console.error("Error during peer.signal (user-joined):", err);
+        }
       }
-    });
-    
-    // Handle peer close/destruction
-    peer.on("close", () => {
-      console.log("Peer connection closed");
-      handlePeerDisconnect();
-    });
-    
-    peer.on("error", (err) => {
-      console.error("Peer error:", err);
-      handlePeerDisconnect();
-    });
-    
-    // Remove any previous listener before adding a new one
-    socket.off("callaccepted");
-    
-    socket.on("callaccepted", ({ signal, name: calleeName }) => {
-      console.log("Call accepted by:", calleeName);
-      setCallAccepted(true);
-      setCallEnded(false);
-      setCall((prev) => ({ ...prev, name: calleeName }));
-      peer.signal(signal);
-    });
-  
-    connectionRef.current = peer;
-  };
-  
-  // Handle peer disconnect - similar to call ended but triggered by connection issues
-  const handlePeerDisconnect = () => {
-    console.log("Peer disconnected");
-    
-    // Clear video
-    if (userVideo.current) {
-      userVideo.current.srcObject = null;
+    };
+
+    socket.on("user-joined", handleUserJoined);
+
+    // Listener for receiving returned signal (for non-initiators)
+    const handleReceivingReturnedSignal = (payload) => {
+      console.log("Received returned signal from:", payload.id);
+      const item = peersRef.current.find((p) => p.peerID === payload.id);
+      if (item) {
+        try {
+          item.peer.signal(payload.signal);
+        } catch (err) {
+          console.error("Error during peer.signal (receiving-returned-signal):", err);
+        }
+      }
+    };
+
+    socket.on("receiving-returned-signal", handleReceivingReturnedSignal);
+
+    // Cleanup these listeners when the component unmounts or when stream/name change
+    return () => {
+      socket.off("all-users", handleAllUsers);
+      socket.off("user-connected", handleUserConnected);
+      socket.off("user-joined", handleUserJoined);
+      socket.off("receiving-returned-signal", handleReceivingReturnedSignal);
+    };
+  }, [stream, name]);
+
+  // Listen for "user-disconnected" events and remove the peer from the UI
+  useEffect(() => {
+    const handleUserDisconnected = (id) => {
+      console.log("User disconnected with ID:", id);
+      const peerObj = peersRef.current.find((p) => p.peerID === id);
+      if (peerObj && peerObj.peer) {
+        peerObj.peer.destroy();
+      }
+      peersRef.current = peersRef.current.filter((p) => p.peerID !== id);
+      setPeers((prev) => prev.filter((p) => p.peerID !== id));
+    };
+
+    socket.on("user-disconnected", handleUserDisconnected);
+    return () => {
+      socket.off("user-disconnected", handleUserDisconnected);
+    };
+  }, []);
+
+  // Auto-join room if name and stream are available (only once thanks to joinedRef)
+  useEffect(() => {
+    if (name && stream && roomId) {
+      joinRoom();
     }
-    
-    // Reset call state
-    setCallAccepted(false);
-    setCallEnded(true);
-    setCall({});
-    
-    // Reset connection ref
-    connectionRef.current = null;
-    
-    // Reset call ended state after delay
-    setTimeout(() => {
-      setCallEnded(false);
-    }, 1000);
-  };
-  
-  const leaveCall = () => {
-    setCallEnded(true);
-  
-    // Notify other user that call is ending
-    socket.emit("callended");
-  
-    // Destroy peer connection
-    if (connectionRef.current) {
-      connectionRef.current.destroy();
-      connectionRef.current = null;
+  }, [name, stream, roomId]);
+
+  // Clean up on component unmount
+  useEffect(() => {
+    return () => {
+      cleanupConnections();
+      socket.off("all-users");
+      socket.off("user-connected");
+      socket.off("user-joined");
+      socket.off("receiving-returned-signal");
+      socket.off("user-disconnected");
+      socket.disconnect();
+    };
+  }, []);
+
+  // Updated leaveRoom function
+  const leaveRoom = () => {
+    console.log("Leaving room, cleaning up connections...");
+    socket.emit("leave-room");
+    cleanupConnections();
+    if (socket.connected) {
+      socket.disconnect();
     }
-  
-    // Reset call state
-    setCall({});
-    setCallAccepted(false);
-    
-    // Clear remote video
-    if (userVideo.current) {
-      userVideo.current.srcObject = null;
-    }
-    
-    // Reset call ended state after delay to allow new calls
-    setTimeout(() => {
-      setCallEnded(false);
-    }, 1000);
+    setName("");
+    joinedRef.current = false;
   };
-  
+
   return (
     <SocketContext.Provider
       value={{
-        call,
-        callAccepted,
-        myVideo,
-        userVideo,
+        me,
         stream,
+        myVideo,
+        peers,
         name,
         setName,
-        callEnded,
-        me,
-        callUser,
-        leaveCall,
-        answerCall,
+        roomId,
+        setRoomId,
+        leaveRoom,
       }}
     >
       {children}
