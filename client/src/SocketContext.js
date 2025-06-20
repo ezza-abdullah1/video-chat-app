@@ -8,14 +8,12 @@ const socket = io("http://localhost:5000", { transports: ["websocket"] });
 const ContextProvider = ({ children }) => {
   const [stream, setStream] = useState(null);
   const [me, setMe] = useState("");
-  const [peers, setPeers] = useState([]); // List of { peerID, peer, name }
+  const [peers, setPeers] = useState([]); // List of { peerID, peer, name, stream }
   const [name, setName] = useState("");
-  // Set initial roomId to empty so the user must provide one
   const [roomId, setRoomId] = useState("");
 
   const myVideo = useRef();
   const peersRef = useRef([]);
-  // Ref used to guard against duplicate join attempts
   const joinedRef = useRef(false);
 
   // Get user media and set the local stream
@@ -58,7 +56,6 @@ const ContextProvider = ({ children }) => {
 
   // Join the meeting room (only emit join event if not already joined)
   const joinRoom = () => {
-    // Guard: don't join twice
     if (joinedRef.current) return;
     joinedRef.current = true;
 
@@ -75,26 +72,73 @@ const ContextProvider = ({ children }) => {
   useEffect(() => {
     if (!stream || !name) return;
 
+    /**
+     * Helper function to create and configure a Simple-Peer instance.
+     * This function now ensures that the 'stream' property is updated in the 'peers' state
+     * when a remote stream is received.
+     */
+    const createPeer = (userToSignal, initiator, localStream, initialName) => {
+      const peer = new Peer({
+        initiator,
+        trickle: false,
+        stream: localStream,
+      });
+
+      peer.on("signal", (signal) => {
+        socket.emit("sending-signal", {
+          userToSignal: userToSignal,
+          signal,
+          callerId: socket.id,
+          callerName: name,
+        });
+      });
+
+      // Crucial change: Update the 'peers' state with the remote stream
+      peer.on("stream", (remoteStream) => {
+        console.log(`Received remote stream from ${userToSignal}`);
+        setPeers((prevPeers) => {
+          const existingPeerIndex = prevPeers.findIndex(
+            (p) => p.peerID === userToSignal
+          );
+          if (existingPeerIndex > -1) {
+            // If peer already exists in state, update its stream
+            const updatedPeers = [...prevPeers];
+            updatedPeers[existingPeerIndex] = {
+              ...updatedPeers[existingPeerIndex],
+              stream: remoteStream, // <<< THIS LINE IS CRUCIAL
+            };
+            return updatedPeers;
+          } else {
+            // Fallback: If for some reason peer isn't in state yet, add it with stream
+            return [
+              ...prevPeers,
+              { peerID: userToSignal, peer, name: initialName, stream: remoteStream },
+            ];
+          }
+        });
+      });
+
+      peer.on("close", () => {
+        console.log("Peer connection closed for:", userToSignal);
+        setPeers((prev) => prev.filter((p) => p.peerID !== userToSignal));
+        peersRef.current = peersRef.current.filter((p) => p.peerID !== userToSignal);
+      });
+
+      peer.on("error", (err) => {
+        console.error("Peer error with", userToSignal, ":", err);
+      });
+
+      return peer;
+    };
+
     // Listener for receiving the list of all users in the room (for initiator)
     const handleAllUsers = (users) => {
       console.log("Received all users:", users);
       const peersFromUsers = [];
       users.forEach((user) => {
-        const peer = new Peer({
-          initiator: true,
-          trickle: false,
-          stream,
-        });
-        peer.on("signal", (signal) => {
-          socket.emit("sending-signal", {
-            userToSignal: user.id,
-            signal,
-            callerId: socket.id,
-            callerName: name,
-          });
-        });
-        peersRef.current.push({ peerID: user.id, peer, name: user.name });
-        peersFromUsers.push({ peerID: user.id, peer, name: user.name });
+        const peer = createPeer(user.id, true, stream, user.name); // Pass user.name for initial peer object
+        peersRef.current.push({ peerID: user.id, peer, name: user.name, stream: null });
+        peersFromUsers.push({ peerID: user.id, peer, name: user.name, stream: null });
       });
       setPeers(peersFromUsers);
     };
@@ -104,18 +148,11 @@ const ContextProvider = ({ children }) => {
     // Listener for new users connecting (for non-initiators)
     const handleUserConnected = (payload) => {
       console.log("User connected:", payload.callerId);
-      const peer = new Peer({
-        initiator: false,
-        trickle: false,
-        stream,
-      });
-      peer.on("signal", (signal) => {
-        socket.emit("returning-signal", { signal, callerId: payload.callerId });
-      });
-      peersRef.current.push({ peerID: payload.callerId, peer, name: payload.callerName });
+      const peer = createPeer(payload.callerId, false, stream, payload.callerName); // Pass callerName
+      peersRef.current.push({ peerID: payload.callerId, peer, name: payload.callerName, stream: null });
       setPeers((prev) => [
         ...prev,
-        { peerID: payload.callerId, peer, name: payload.callerName },
+        { peerID: payload.callerId, peer, name: payload.callerName, stream: null },
       ]);
     };
 
@@ -207,6 +244,7 @@ const ContextProvider = ({ children }) => {
       socket.disconnect();
     }
     setName("");
+    setRoomId("");
     joinedRef.current = false;
   };
 
@@ -221,7 +259,9 @@ const ContextProvider = ({ children }) => {
         setName,
         roomId,
         setRoomId,
+        joinRoom,
         leaveRoom,
+        setStream, // Expose setStream to consumers
       }}
     >
       {children}
