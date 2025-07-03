@@ -8,19 +8,11 @@ import {
   Alert,
   Typography,
   TextField,
-  Badge,
-  Dialog,
+  Badge, // Added for participants count
+  Dialog, // For settings/chat modal
   DialogTitle,
   DialogContent,
-  DialogActions,
-  Button,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemAvatar,
-  Avatar,
-  Divider,
-  InputAdornment,
+  Button, // For general use in dialogs or new actions
 } from "@mui/material";
 import {
   ContentCopy,
@@ -29,17 +21,16 @@ import {
   Mic,
   MicOff,
   ExitToApp,
-  People,
-  Chat,
-  Settings,
-  ScreenShare,
-  StopScreenShare,
-  Send,
-  Person,
+  People, // Icon for participants
+  Chat, // Icon for messages
+  Settings, // Icon for settings
+  ScreenShare, // Icon for screen share
+  StopScreenShare, // Icon for stopping screen share
 } from "@mui/icons-material";
 import { SocketContext } from "../SocketContext";
 
 const Options = () => {
+  // Destructure all necessary values from SocketContext, including setStream and notifyTrackStateChange
   const { 
     me, 
     stream, 
@@ -49,35 +40,38 @@ const Options = () => {
     roomId, 
     peers, 
     myVideo, 
-    setStream,
-    sendMessage,
-    messages,
-    sendVideoState,
-    sendAudioState
+    setStream, 
+    notifyTrackStateChange, 
+    updatePeerStreams 
   } = useContext(SocketContext);
 
+  // Local states for UI and functionality
   const [copied, setCopied] = useState(false);
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [showChatPanel, setShowChatPanel] = useState(false);
-  const [showParticipantsPanel, setShowParticipantsPanel] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const [originalStream, setOriginalStream] = useState(null);
-  const [chatMessage, setChatMessage] = useState("");
-  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [showChatPanel, setShowChatPanel] = useState(false); // State for chat panel visibility
+  const [showSettingsModal, setShowSettingsModal] = useState(false); // State for settings modal visibility
+  const [isSharingScreen, setIsSharingScreen] = useState(false); // State for screen sharing status
+  const [originalStream, setOriginalStream] = useState(null); // To store original stream before screen share
 
-  const participantsCount = peers.length + 1;
+  // Calculate participants count (local user + remote peers)
+  const participantsCount = peers.length + 1; // +1 for the current user
 
+  // Handle copying Room ID to clipboard
   const handleCopyClick = () => {
     if (roomId) {
-      navigator.clipboard.writeText(roomId).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 3000);
-      });
+      const el = document.createElement('textarea');
+      el.value = roomId;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
     }
   };
 
+  // FIXED: Toggle video by manipulating the enabled state of its tracks AND notify other users
   const toggleVideo = () => {
     if (stream) {
       const videoTracks = stream.getVideoTracks();
@@ -88,14 +82,13 @@ const Options = () => {
         });
         setVideoEnabled(newVideoEnabled);
         
-        // Send video state to other users
-        if (sendVideoState) {
-          sendVideoState(newVideoEnabled);
-        }
+        // CRUCIAL FIX: Notify other users about the track state change
+        notifyTrackStateChange('video', newVideoEnabled);
       }
     }
   };
 
+  // FIXED: Toggle audio similarly by manipulating the enabled state of its tracks AND notify other users
   const toggleAudio = () => {
     if (stream) {
       const audioTracks = stream.getAudioTracks();
@@ -106,97 +99,105 @@ const Options = () => {
         });
         setAudioEnabled(newAudioEnabled);
         
-        // Send audio state to other users
-        if (sendAudioState) {
-          sendAudioState(newAudioEnabled);
-        }
+        // CRUCIAL FIX: Notify other users about the track state change
+        notifyTrackStateChange('audio', newAudioEnabled);
       }
     }
   };
 
+  // Function to start screen sharing
   const startScreenShare = async () => {
     try {
+      // Store the original camera stream
       setOriginalStream(stream);
+
+      // Get display media (screen share)
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
-        audio: true,
+        audio: true, // Request audio from screen share too
       });
 
-      const videoTrack = screenStream.getVideoTracks()[0];
-      const audioTrack = screenStream.getAudioTracks()[0];
+      // Update the stream in context
+      setStream(screenStream);
 
-      if (stream) {
-        const existingVideoTrack = stream.getVideoTracks()[0];
-        const existingAudioTrack = stream.getAudioTracks()[0];
-
-        if (existingVideoTrack) existingVideoTrack.stop();
-        if (existingAudioTrack) existingAudioTrack.stop();
-
-        stream.removeTrack(existingVideoTrack);
-        stream.removeTrack(existingAudioTrack);
-        stream.addTrack(videoTrack);
-        stream.addTrack(audioTrack);
-      } else {
-        setStream(screenStream);
-      }
-
+      // Update myVideo ref to show screen share
       if (myVideo.current) {
         myVideo.current.srcObject = screenStream;
       }
 
-      videoTrack.onended = () => {
-        stopScreenShare();
-      };
+      // Update all peer connections with the new screen stream
+      updatePeerStreams(screenStream);
+
+      // Listen for screen share stopping (user clicks "Stop Sharing" in browser UI)
+      const videoTrack = screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          stopScreenShare();
+        };
+      }
 
       setIsSharingScreen(true);
-      setVideoEnabled(true);
-      setAudioEnabled(true);
+      setVideoEnabled(true); // Video is on if screen sharing
+      setAudioEnabled(true); // Audio is on if screen sharing from screen stream
+      
+      // Notify other users that video is now on (screen sharing)
+      notifyTrackStateChange('video', true);
+      notifyTrackStateChange('audio', true);
+      
+      console.log("Screen sharing started:", screenStream);
+
     } catch (err) {
       console.error("Error starting screen share:", err);
       setIsSharingScreen(false);
+      // Revert to original stream if screen sharing failed (optional)
       if (originalStream && myVideo.current) {
-        myVideo.current.srcObject = originalStream;
+         myVideo.current.srcObject = originalStream;
       }
     }
   };
 
+  // Function to stop screen sharing
   const stopScreenShare = () => {
     if (stream && isSharingScreen) {
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach((track) => track.stop()); // Stop all current tracks (screen share)
     }
 
+    // Revert to original camera stream if it exists
     if (originalStream) {
       setStream(originalStream);
       if (myVideo.current) {
         myVideo.current.srcObject = originalStream;
       }
+      
+      // Update all peer connections with the original stream
+      updatePeerStreams(originalStream);
+      
+      // Re-enable original audio/video tracks based on their state before screen share
       const videoTrack = originalStream.getVideoTracks()[0];
       const audioTrack = originalStream.getAudioTracks()[0];
-      if (videoTrack) setVideoEnabled(videoTrack.enabled);
-      if (audioTrack) setAudioEnabled(audioTrack.enabled);
+      
+      if (videoTrack) {
+        setVideoEnabled(videoTrack.enabled);
+        notifyTrackStateChange('video', videoTrack.enabled);
+      }
+      if (audioTrack) {
+        setAudioEnabled(audioTrack.enabled);
+        notifyTrackStateChange('audio', audioTrack.enabled);
+      }
     } else {
+      // If no original stream, ensure video is off and audio is off
       setVideoEnabled(false);
       setAudioEnabled(false);
+      notifyTrackStateChange('video', false);
+      notifyTrackStateChange('audio', false);
     }
 
     setIsSharingScreen(false);
-    setOriginalStream(null);
+    setOriginalStream(null); // Clear original stream reference
+    console.log("Screen sharing stopped.");
   };
 
-  const handleSendMessage = () => {
-    if (chatMessage.trim() && sendMessage) {
-      sendMessage(chatMessage);
-      setChatMessage("");
-    }
-  };
-
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
+  // Set the initial state of video/audio controls based on the current stream properties
   useEffect(() => {
     if (stream) {
       const videoTrack = stream.getVideoTracks()[0];
@@ -204,76 +205,58 @@ const Options = () => {
       if (videoTrack) setVideoEnabled(videoTrack.enabled);
       if (audioTrack) setAudioEnabled(audioTrack.enabled);
     }
-  }, [stream]);
-
-  useEffect(() => {
-    if (!showChatPanel && messages && messages.length > 0) {
-      setUnreadMessages(messages.length);
-    } else if (showChatPanel) {
-      setUnreadMessages(0);
-    }
-  }, [messages, showChatPanel]);
+  }, [stream]); // Re-run if the stream object itself changes
 
   return (
     <Box sx={{ width: "100%", position: "relative" }}>
       <Paper
-        elevation={3}
+        elevation={1}
         sx={{
           p: 2,
           mb: 2,
-          borderRadius: 3,
+          borderRadius: 4,
           display: "flex",
           flexDirection: { xs: 'column', sm: 'row' },
-          justifyContent: "space-between",
+          justifyContent: "space-around",
           alignItems: "center",
-          backgroundColor: "#1a1a1a",
-          color: "white",
-          gap: { xs: 2, sm: 3 },
+          backgroundColor: "rgba(255, 255, 255, 0.9)",
+          gap: { xs: 1, sm: 2 },
         }}
       >
         {/* Meeting Info Section */}
-        <Box sx={{ 
-          display: "flex", 
-          flexDirection: "column", 
-          gap: 1, 
-          alignItems: { xs: 'center', sm: 'flex-start' },
-          minWidth: { xs: '100%', sm: '200px' }
-        }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            {name || "Meeting"}
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, alignItems: { xs: 'center', sm: 'flex-start' } }}>
+          <TextField
+            label="Your Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            fullWidth
+            size="small"
+            variant="outlined"
+            disabled={true}
+            sx={{ maxWidth: { xs: '100%', sm: '180px' } }}
+          />
+          {/* Display Room ID explicitly */}
+          <Typography variant="body2" color="textSecondary">
+              Meeting Room ID: <strong>{roomId}</strong>
+              <Tooltip title="Copy Room ID">
+                  <IconButton onClick={handleCopyClick} color="primary" size="small" sx={{ ml: 0.5 }}>
+                      <ContentCopy fontSize="small" />
+                  </IconButton>
+              </Tooltip>
           </Typography>
-          <Typography variant="body2" sx={{ color: "#b0b0b0" }}>
-            Room: {roomId}
-            <Tooltip title="Copy Room ID">
-              <IconButton 
-                onClick={handleCopyClick} 
-                size="small" 
-                sx={{ ml: 1, color: "#4285f4" }}
-              >
-                <ContentCopy fontSize="small" />
-              </IconButton>
-            </Tooltip>
+          <Typography variant="caption" color="textSecondary">
+              Your User ID: <strong>{me}</strong>
           </Typography>
         </Box>
 
-        {/* Central Controls */}
-        <Box sx={{ 
-          display: "flex", 
-          gap: 1, 
-          justifyContent: 'center',
-          alignItems: 'center'
-        }}>
-          <Tooltip title={audioEnabled ? "Turn off microphone" : "Turn on microphone"}>
+        {/* Central Call Control Buttons */}
+        <Box sx={{ display: "flex", gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Tooltip title={audioEnabled ? "Mute Microphone" : "Unmute Microphone"}>
             <IconButton
               onClick={toggleAudio}
               sx={{
-                width: 48,
-                height: 48,
-                backgroundColor: audioEnabled ? "rgba(255,255,255,0.1)" : "#ea4335",
-                color: "white",
-                "&:hover": {
-                  backgroundColor: audioEnabled ? "rgba(255,255,255,0.2)" : "#d33b2c",
-                },
+                backgroundColor: audioEnabled ? "rgba(0,0,0,0.05)" : "red",
+                color: audioEnabled ? "inherit" : "white",
               }}
             >
               {audioEnabled ? <Mic /> : <MicOff />}
@@ -283,297 +266,65 @@ const Options = () => {
           <Tooltip title={videoEnabled && !isSharingScreen ? "Turn off camera" : "Turn on camera"}>
             <IconButton
               onClick={toggleVideo}
-              disabled={isSharingScreen}
+              disabled={isSharingScreen} // Disable camera toggle if screen sharing
               sx={{
-                width: 48,
-                height: 48,
-                backgroundColor: videoEnabled && !isSharingScreen ? "rgba(255,255,255,0.1)" : "#ea4335",
-                color: "white",
-                "&:hover": {
-                  backgroundColor: videoEnabled && !isSharingScreen ? "rgba(255,255,255,0.2)" : "#d33b2c",
-                },
-                "&:disabled": {
-                  backgroundColor: "#666",
-                  color: "#999",
-                },
+                backgroundColor: videoEnabled && !isSharingScreen ? "rgba(0,0,0,0.05)" : "red",
+                color: videoEnabled && !isSharingScreen ? "inherit" : "white",
               }}
             >
               {videoEnabled && !isSharingScreen ? <Videocam /> : <VideocamOff />}
             </IconButton>
           </Tooltip>
 
-          <Tooltip title={isSharingScreen ? "Stop presenting" : "Present now"}>
+          {/* Screen Share Button */}
+          <Tooltip title={isSharingScreen ? "Stop Sharing Screen" : "Share Screen"}>
             <IconButton
               onClick={isSharingScreen ? stopScreenShare : startScreenShare}
-              sx={{
-                width: 48,
-                height: 48,
-                backgroundColor: isSharingScreen ? "#34a853" : "rgba(255,255,255,0.1)",
-                color: "white",
-                "&:hover": {
-                  backgroundColor: isSharingScreen ? "#2d8f3f" : "rgba(255,255,255,0.2)",
-                },
-              }}
+              color={isSharingScreen ? "secondary" : "primary"}
             >
               {isSharingScreen ? <StopScreenShare /> : <ScreenShare />}
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="Leave call">
+          {/* Leave Meeting Button */}
+          <Tooltip title="Leave Meeting">
             <IconButton
               onClick={leaveRoom}
-              sx={{
-                width: 48,
-                height: 48,
-                backgroundColor: "#ea4335",
-                color: "white",
-                "&:hover": {
-                  backgroundColor: "#d33b2c",
-                },
-              }}
+              sx={{ backgroundColor: "red", color: "white" }}
             >
               <ExitToApp />
             </IconButton>
           </Tooltip>
         </Box>
 
-        {/* Right Side Controls */}
-        <Box sx={{ display: "flex", gap: 1, alignItems: 'center' }}>
-          <Tooltip title="Show everyone">
-            <IconButton
-              onClick={() => setShowParticipantsPanel(true)}
-              sx={{
-                color: "white",
-                "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
-              }}
-            >
+        {/* Other Meeting Features (Participants, Chat, Settings) */}
+        <Box sx={{ display: "flex", gap: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {/* Participants Count */}
+          <Tooltip title="Participants">
+            <IconButton>
               <Badge badgeContent={participantsCount} color="primary" showZero>
                 <People />
               </Badge>
             </IconButton>
           </Tooltip>
 
-          <Tooltip title="Chat with everyone">
-            <IconButton
-              onClick={() => setShowChatPanel(true)}
-              sx={{
-                color: "white",
-                "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
-              }}
-            >
-              <Badge badgeContent={unreadMessages} color="error" showZero={false}>
-                <Chat />
-              </Badge>
+          {/* Messages Panel Button */}
+          <Tooltip title="Chat Messages">
+            <IconButton onClick={() => setShowChatPanel(true)}>
+              <Chat />
             </IconButton>
           </Tooltip>
 
+          {/* Settings Button */}
           <Tooltip title="Settings">
-            <IconButton
-              onClick={() => setShowSettingsModal(true)}
-              sx={{
-                color: "white",
-                "&:hover": { backgroundColor: "rgba(255,255,255,0.1)" },
-              }}
-            >
+            <IconButton onClick={() => setShowSettingsModal(true)}>
               <Settings />
             </IconButton>
           </Tooltip>
         </Box>
       </Paper>
 
-      {/* Participants Panel */}
-      <Dialog 
-        open={showParticipantsPanel} 
-        onClose={() => setShowParticipantsPanel(false)}
-        maxWidth="sm" 
-        fullWidth
-        PaperProps={{
-          sx: { borderRadius: 3 }
-        }}
-      >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="h6" component="div">
-            People ({participantsCount})
-          </Typography>
-        </DialogTitle>
-        <DialogContent dividers sx={{ p: 0 }}>
-          <List>
-            {/* Current User */}
-            <ListItem>
-              <ListItemAvatar>
-                <Avatar sx={{ bgcolor: "#4285f4" }}>
-                  <Person />
-                </Avatar>
-              </ListItemAvatar>
-              <ListItemText
-                primary={`${name || "You"} (You)`}
-                secondary="Host"
-              />
-            </ListItem>
-            <Divider />
-            
-            {/* Remote Participants */}
-            {peers.map((peer) => (
-              <ListItem key={peer.peerID}>
-                <ListItemAvatar>
-                  <Avatar sx={{ bgcolor: "#34a853" }}>
-                    <Person />
-                  </Avatar>
-                </ListItemAvatar>
-                <ListItemText
-                  primary={peer.name || "Unknown"}
-                  secondary={peer.videoEnabled === false ? "Camera off" : ""}
-                />
-              </ListItem>
-            ))}
-          </List>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowParticipantsPanel(false)}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Enhanced Chat Panel */}
-      <Dialog 
-        open={showChatPanel} 
-        onClose={() => setShowChatPanel(false)} 
-        maxWidth="sm" 
-        fullWidth
-        PaperProps={{
-          sx: { borderRadius: 3, height: '70vh' }
-        }}
-      >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="h6" component="div">
-            Chat
-          </Typography>
-        </DialogTitle>
-        <DialogContent 
-          dividers 
-          sx={{ 
-            p: 0, 
-            display: 'flex', 
-            flexDirection: 'column',
-            height: '50vh'
-          }}
-        >
-          {/* Messages Area */}
-          <Box sx={{ 
-            flex: 1, 
-            overflowY: 'auto', 
-            p: 2,
-            backgroundColor: '#f8f9fa'
-          }}>
-            {messages && messages.length > 0 ? (
-              messages.map((msg, index) => (
-                <Box
-                  key={index}
-                  sx={{
-                    mb: 2,
-                    p: 2,
-                    borderRadius: 2,
-                    backgroundColor: msg.sender === me ? '#e3f2fd' : 'white',
-                    alignSelf: msg.sender === me ? 'flex-end' : 'flex-start',
-                    maxWidth: '80%',
-                    boxShadow: 1,
-                  }}
-                >
-                  <Typography variant="caption" color="textSecondary">
-                    {msg.senderName} • {new Date(msg.timestamp).toLocaleTimeString()}
-                  </Typography>
-                  <Typography variant="body1" sx={{ mt: 0.5 }}>
-                    {msg.message}
-                  </Typography>
-                </Box>
-              ))
-            ) : (
-              <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center', mt: 4 }}>
-                No messages yet. Start the conversation!
-              </Typography>
-            )}
-          </Box>
-          
-          {/* Message Input */}
-          <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0' }}>
-            <TextField
-              fullWidth
-              placeholder="Send a message to everyone"
-              value={chatMessage}
-              onChange={(e) => setChatMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              multiline
-              maxRows={3}
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton 
-                      onClick={handleSendMessage}
-                      disabled={!chatMessage.trim()}
-                      color="primary"
-                    >
-                      <Send />
-                    </IconButton>
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Box>
-        </DialogContent>
-      </Dialog>
-
-      {/* Settings Modal */}
-      <Dialog 
-        open={showSettingsModal} 
-        onClose={() => setShowSettingsModal(false)} 
-        maxWidth="sm" 
-        fullWidth
-      >
-        <DialogTitle>Settings</DialogTitle>
-        <DialogContent dividers>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            Audio & Video
-          </Typography>
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>
-              Microphone
-            </Typography>
-            <TextField
-              select
-              fullWidth
-              defaultValue="default"
-              SelectProps={{
-                native: true,
-              }}
-            >
-              <option value="default">Default - Built-in Microphone</option>
-            </TextField>
-          </Box>
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" sx={{ mb: 1 }}>
-              Camera
-            </Typography>
-            <TextField
-              select
-              fullWidth
-              defaultValue="default"
-              SelectProps={{
-                native: true,
-              }}
-            >
-              <option value="default">Default - Built-in Camera</option>
-            </TextField>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowSettingsModal(false)}>
-            Done
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Copy Confirmation */}
+      {/* Snackbar for copy to clipboard confirmation */}
       <Snackbar
         open={copied}
         autoHideDuration={3000}
@@ -584,6 +335,52 @@ const Options = () => {
           Room ID copied to clipboard!
         </Alert>
       </Snackbar>
+
+      {/* Chat Panel Dialog (Placeholder) */}
+      <Dialog open={showChatPanel} onClose={() => setShowChatPanel(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Chat</DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ height: 300, overflowY: 'auto', border: '1px solid #eee', p: 2, mb: 2, borderRadius: 2 }}>
+            <Typography variant="body2" color="textSecondary">
+              (Chat messages will appear here. Functionality to send/receive messages needs backend support.)
+            </Typography>
+          </Box>
+          <TextField
+            fullWidth
+            placeholder="Type your message..."
+            variant="outlined"
+            size="small"
+            // You would add onChange and onSubmit for actual chat functionality
+          />
+          <Button variant="contained" color="primary" sx={{ mt: 1 }}>Send</Button>
+        </DialogContent>
+      </Dialog>
+
+      {/* Settings Modal Dialog (Placeholder) */}
+      <Dialog open={showSettingsModal} onClose={() => setShowSettingsModal(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Settings</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="textSecondary">
+            (Audio/Video settings and other preferences would go here. For example, device selection.)
+          </Typography>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle1">Audio Input</Typography>
+            {/* Placeholder for device selection */}
+            <TextField select fullWidth label="Microphone" defaultValue="default" variant="outlined" size="small">
+              <option value="default">Default Microphone</option>
+              {/* Map actual devices here */}
+            </TextField>
+          </Box>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle1">Video Input</Typography>
+            {/* Placeholder for device selection */}
+            <TextField select fullWidth label="Camera" defaultValue="default" variant="outlined" size="small">
+              <option value="default">Default Camera</option>
+              {/* Map actual devices here */}
+            </TextField>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 };
