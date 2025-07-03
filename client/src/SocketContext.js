@@ -54,6 +54,23 @@ const ContextProvider = ({ children }) => {
     setPeers([]);
   };
 
+  // Function to update all peer connections with new stream
+  const updatePeerStreams = (newStream) => {
+    peersRef.current.forEach(({ peer }) => {
+      if (peer && peer.streams && peer.streams.length > 0) {
+        // Remove old stream
+        peer.streams[0].getTracks().forEach(track => {
+          peer.removeTrack(track, peer.streams[0]);
+        });
+        
+        // Add new stream tracks
+        newStream.getTracks().forEach(track => {
+          peer.addTrack(track, newStream);
+        });
+      }
+    });
+  };
+
   // Join the meeting room (only emit join event if not already joined)
   const joinRoom = () => {
     if (joinedRef.current) return;
@@ -188,12 +205,36 @@ const ContextProvider = ({ children }) => {
 
     socket.on("receiving-returned-signal", handleReceivingReturnedSignal);
 
+    // NEW: Listen for track state changes from other users
+    const handleTrackStateChange = (payload) => {
+      console.log("Received track state change:", payload);
+      const { userId, trackType, enabled } = payload;
+      
+      setPeers((prevPeers) => {
+        return prevPeers.map((peer) => {
+          if (peer.peerID === userId && peer.stream) {
+            const tracks = trackType === 'video' 
+              ? peer.stream.getVideoTracks() 
+              : peer.stream.getAudioTracks();
+            
+            tracks.forEach(track => {
+              track.enabled = enabled;
+            });
+          }
+          return peer;
+        });
+      });
+    };
+
+    socket.on("track-state-change", handleTrackStateChange);
+
     // Cleanup these listeners when the component unmounts or when stream/name change
     return () => {
       socket.off("all-users", handleAllUsers);
       socket.off("user-connected", handleUserConnected);
       socket.off("user-joined", handleUserJoined);
       socket.off("receiving-returned-signal", handleReceivingReturnedSignal);
+      socket.off("track-state-change", handleTrackStateChange);
     };
   }, [stream, name]);
 
@@ -231,6 +272,7 @@ const ContextProvider = ({ children }) => {
       socket.off("user-joined");
       socket.off("receiving-returned-signal");
       socket.off("user-disconnected");
+      socket.off("track-state-change");
       socket.disconnect();
     };
   }, []);
@@ -248,6 +290,16 @@ const ContextProvider = ({ children }) => {
     joinedRef.current = false;
   };
 
+  // NEW: Function to notify other users about track state changes
+  const notifyTrackStateChange = (trackType, enabled) => {
+    socket.emit("track-state-change", {
+      roomId,
+      trackType,
+      enabled,
+      userId: socket.id
+    });
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -262,6 +314,8 @@ const ContextProvider = ({ children }) => {
         joinRoom,
         leaveRoom,
         setStream, // Expose setStream to consumers
+        notifyTrackStateChange, // NEW: Expose the notification function
+        updatePeerStreams, // NEW: Expose the peer stream update function
       }}
     >
       {children}

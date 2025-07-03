@@ -30,8 +30,20 @@ import {
 import { SocketContext } from "../SocketContext";
 
 const Options = () => {
-  // Destructure all necessary values from SocketContext, including setStream
-  const { me, stream, leaveRoom, name, setName, roomId, peers, myVideo, setStream } = useContext(SocketContext);
+  // Destructure all necessary values from SocketContext, including setStream and notifyTrackStateChange
+  const { 
+    me, 
+    stream, 
+    leaveRoom, 
+    name, 
+    setName, 
+    roomId, 
+    peers, 
+    myVideo, 
+    setStream, 
+    notifyTrackStateChange, 
+    updatePeerStreams 
+  } = useContext(SocketContext);
 
   // Local states for UI and functionality
   const [copied, setCopied] = useState(false);
@@ -59,7 +71,7 @@ const Options = () => {
     }
   };
 
-  // Toggle video by manipulating the enabled state of its tracks
+  // FIXED: Toggle video by manipulating the enabled state of its tracks AND notify other users
   const toggleVideo = () => {
     if (stream) {
       const videoTracks = stream.getVideoTracks();
@@ -69,11 +81,14 @@ const Options = () => {
           track.enabled = newVideoEnabled;
         });
         setVideoEnabled(newVideoEnabled);
+        
+        // CRUCIAL FIX: Notify other users about the track state change
+        notifyTrackStateChange('video', newVideoEnabled);
       }
     }
   };
 
-  // Toggle audio similarly by manipulating the enabled state of its tracks
+  // FIXED: Toggle audio similarly by manipulating the enabled state of its tracks AND notify other users
   const toggleAudio = () => {
     if (stream) {
       const audioTracks = stream.getAudioTracks();
@@ -83,6 +98,9 @@ const Options = () => {
           track.enabled = newAudioEnabled;
         });
         setAudioEnabled(newAudioEnabled);
+        
+        // CRUCIAL FIX: Notify other users about the track state change
+        notifyTrackStateChange('audio', newAudioEnabled);
       }
     }
   };
@@ -99,44 +117,33 @@ const Options = () => {
         audio: true, // Request audio from screen share too
       });
 
-      // Replace video track in current stream with screen share track
-      const videoTrack = screenStream.getVideoTracks()[0];
-      const audioTrack = screenStream.getAudioTracks()[0]; // Screen share audio
-
-      if (stream) {
-        const existingVideoTrack = stream.getVideoTracks()[0];
-        const existingAudioTrack = stream.getAudioTracks()[0];
-
-        // Stop existing camera tracks if they exist
-        if (existingVideoTrack) existingVideoTrack.stop();
-        if (existingAudioTrack) existingAudioTrack.stop();
-
-        // Replace tracks in the existing stream object
-        // This is a simplified approach; in a full WebRTC app, you'd iterate
-        // through each peer connection and use `peer.replaceTrack()` for each one.
-        // For demonstration purposes, we're replacing tracks directly in the local stream object.
-        stream.removeTrack(existingVideoTrack);
-        stream.removeTrack(existingAudioTrack);
-        stream.addTrack(videoTrack);
-        stream.addTrack(audioTrack);
-      } else {
-        // If no existing stream, set the screen stream as the main stream
-        setStream(screenStream); // Now setStream is defined!
-      }
+      // Update the stream in context
+      setStream(screenStream);
 
       // Update myVideo ref to show screen share
       if (myVideo.current) {
         myVideo.current.srcObject = screenStream;
       }
 
+      // Update all peer connections with the new screen stream
+      updatePeerStreams(screenStream);
+
       // Listen for screen share stopping (user clicks "Stop Sharing" in browser UI)
-      videoTrack.onended = () => {
-        stopScreenShare();
-      };
+      const videoTrack = screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.onended = () => {
+          stopScreenShare();
+        };
+      }
 
       setIsSharingScreen(true);
       setVideoEnabled(true); // Video is on if screen sharing
       setAudioEnabled(true); // Audio is on if screen sharing from screen stream
+      
+      // Notify other users that video is now on (screen sharing)
+      notifyTrackStateChange('video', true);
+      notifyTrackStateChange('audio', true);
+      
       console.log("Screen sharing started:", screenStream);
 
     } catch (err) {
@@ -157,26 +164,38 @@ const Options = () => {
 
     // Revert to original camera stream if it exists
     if (originalStream) {
-      setStream(originalStream); // Now setStream is defined!
+      setStream(originalStream);
       if (myVideo.current) {
         myVideo.current.srcObject = originalStream;
       }
+      
+      // Update all peer connections with the original stream
+      updatePeerStreams(originalStream);
+      
       // Re-enable original audio/video tracks based on their state before screen share
       const videoTrack = originalStream.getVideoTracks()[0];
       const audioTrack = originalStream.getAudioTracks()[0];
-      if (videoTrack) setVideoEnabled(videoTrack.enabled);
-      if (audioTrack) setAudioEnabled(audioTrack.enabled);
+      
+      if (videoTrack) {
+        setVideoEnabled(videoTrack.enabled);
+        notifyTrackStateChange('video', videoTrack.enabled);
+      }
+      if (audioTrack) {
+        setAudioEnabled(audioTrack.enabled);
+        notifyTrackStateChange('audio', audioTrack.enabled);
+      }
     } else {
       // If no original stream, ensure video is off and audio is off
       setVideoEnabled(false);
       setAudioEnabled(false);
+      notifyTrackStateChange('video', false);
+      notifyTrackStateChange('audio', false);
     }
 
     setIsSharingScreen(false);
     setOriginalStream(null); // Clear original stream reference
     console.log("Screen sharing stopped.");
   };
-
 
   // Set the initial state of video/audio controls based on the current stream properties
   useEffect(() => {

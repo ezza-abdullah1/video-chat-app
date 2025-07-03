@@ -49,7 +49,7 @@ io.on("connection", (socket) => {
 
   // Handle a user leaving explicitly
   socket.on("leave-room", () => {
-    // Broadcast a user-disconnected event so others remove this peer’s video tile
+    // Broadcast a user-disconnected event so others remove this peer's video tile
     for (const roomId of socket.rooms) {
       if (roomId !== socket.id) {
         socket.to(roomId).emit("user-disconnected", socket.id);
@@ -67,9 +67,21 @@ io.on("connection", (socket) => {
     io.to(callerId).emit("receiving-returned-signal", { signal, id: socket.id });
   });
 
+  // NEW: Handle track state changes (video/audio on/off)
+  socket.on("track-state-change", ({ roomId, trackType, enabled, userId }) => {
+    console.log(`Track state change: ${userId} ${trackType} ${enabled ? 'enabled' : 'disabled'}`);
+    
+    // Broadcast the track state change to all other users in the room
+    socket.to(roomId).emit("track-state-change", {
+      userId,
+      trackType,
+      enabled
+    });
+  });
+
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
-    // Inform all rooms (except the socket’s own room) that this user disconnected
+    // Inform all rooms (except the socket's own room) that this user disconnected
     for (const roomId of socket.rooms) {
       if (roomId !== socket.id) {
         socket.to(roomId).emit("user-disconnected", socket.id);
