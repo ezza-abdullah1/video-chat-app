@@ -1,143 +1,231 @@
 import React, { useContext } from "react";
-import { Grid, Paper, Box, Typography, useTheme, useMediaQuery } from "@mui/material";
+import { Grid, Box, Typography, useTheme, useMediaQuery, Avatar } from "@mui/material";
+import { Person, VideocamOff, MicOff } from "@mui/icons-material";
 import { SocketContext } from "../SocketContext";
 
 /**
  * PeerVideo Component: Renders a single remote video stream.
- * It takes the remote stream and the peer's name as props.
  */
 const PeerVideo = ({ remoteStream, peerName }) => {
-  const videoRef = React.useRef(); // Ref to attach the video stream to
+  const videoRef = React.useRef();
 
-  // Attach the remote stream to the video element when remoteStream changes
   React.useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
     }
-  }, [remoteStream]); // Dependency array: run effect when remoteStream changes
+  }, [remoteStream]);
 
   return (
-    <Paper
-      elevation={0}
+    <Box
       sx={{
+        position: "relative",
+        height: { xs: "200px", sm: "250px", md: "300px" }, // Better aspect ratio heights
+        backgroundColor: "#202124",
         borderRadius: 2,
         overflow: "hidden",
-        position: "relative",
-        // Responsive height: full height on mobile, fixed height on desktop
-        height: { xs: "25vh", sm: "30vh", md: "40vh" },
-        backgroundColor: "#000", // Black background for videos
-        display: 'flex', // Use flex for centering content if no stream
+        display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+        border: "1px solid rgba(255,255,255,0.1)",
       }}
     >
-      {/* Conditionally render video tag only if remoteStream is available */}
       {remoteStream ? (
         <video
-          playsInline // Recommended for mobile to play inline
-          autoPlay // Auto-play the video
-          ref={videoRef} // Attach the ref
+          playsInline
+          autoPlay
+          ref={videoRef}
           style={{
             width: "100%",
             height: "100%",
-            objectFit: "cover", // Cover the container while maintaining aspect ratio
+            objectFit: "cover",
           }}
         />
       ) : (
-        // Placeholder when stream is not yet available
-        <Typography variant="body1" color="textSecondary" sx={{ color: '#fff' }}>
-          {peerName || "User"} (Connecting...)
-        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+          <Avatar
+            sx={{
+              width: 48,
+              height: 48,
+              backgroundColor: "#5f6368",
+              fontSize: "1.2rem"
+            }}
+          >
+            <Person sx={{ fontSize: 24 }} />
+          </Avatar>
+          <Typography variant="body2" sx={{ color: '#e8eaed', textAlign: 'center', fontSize: '0.8rem' }}>
+            {peerName || "User"}
+            <br />
+            <span style={{ fontSize: '0.7rem', opacity: 0.7 }}>Connecting...</span>
+          </Typography>
+        </Box>
       )}
 
-      {/* Overlay box for displaying the peer's name */}
+      {/* Name overlay */}
       <Box
         sx={{
           position: "absolute",
           bottom: 8,
           left: 8,
-          backgroundColor: "rgba(0,0,0,0.6)", // Semi-transparent black background
-          color: "#fff", // White text
-          padding: "4px 8px",
-          borderRadius: 4, // Rounded corners for the name tag
+          right: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
         }}
       >
-        <Typography variant="body2">{peerName || "User"}</Typography>
+        <Box
+          sx={{
+            backgroundColor: "rgba(32, 33, 36, 0.9)",
+            color: "#e8eaed",
+            padding: "4px 8px",
+            borderRadius: "12px",
+            backdropFilter: "blur(4px)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 500, fontSize: "0.75rem" }}>
+            {peerName || "User"}
+          </Typography>
+        </Box>
       </Box>
-    </Paper>
+    </Box>
   );
 };
 
 /**
- * VideoPlayer Component: Displays the local user's video and all remote peer videos.
+ * VideoPlayer Component: Modern Google Meet style layout
  */
 const VideoPlayer = () => {
   // Get required context values
   const { myVideo, stream, peers, name } = useContext(SocketContext);
   const theme = useTheme();
-  // Check if it's a mobile device for responsive styling
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-  // Adjust local video height based on screen size
-  const myVideoHeight = isMobile ? "25vh" : "40vh";
+  // Calculate grid layout based on participant count
+  const totalParticipants = peers.length + (stream ? 1 : 0);
+  const getGridCols = () => {
+    if (totalParticipants <= 1) return 6; // Further reduced for better aspect ratio
+    if (totalParticipants <= 2) return 6;
+    if (totalParticipants <= 4) return 6;
+    return 4;
+  };
 
   return (
-    <Box sx={{ width: "100%", mb: { xs: 1, sm: 2 } }}>
-      <Grid container spacing={2} justifyContent="center"> {/* Center grid items */}
-        {/* Your Local Video */}
-        {stream && ( // Only render if local stream is available
-          <Grid item xs={12} sm={6} md={4}>
-            <Paper
-              elevation={0}
-              sx={{
-                borderRadius: 2,
-                overflow: "hidden",
-                position: "relative",
-                height: myVideoHeight,
-                backgroundColor: "#000",
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <video
-                playsInline
-                muted // Mute local video to prevent echo
-                ref={myVideo} // Attach ref to local video element
-                autoPlay // Auto-play local video
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "cover",
-                }}
-              />
+    <Box 
+      sx={{ 
+        width: "100%", 
+        flexGrow: 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        p: { xs: 1, sm: 2 },
+        pb: { xs: 12, sm: 14 }, // Add bottom padding to prevent overlap with controls
+        minHeight: 0,
+      }}
+    >
+      <Box sx={{ width: "100%", maxWidth: { xs: "500px", sm: "600px", md: "700px" } }}> {/* Responsive max widths */}
+        <Grid container spacing={{ xs: 1, sm: 2 }} justifyContent="center">
+          {/* Local Video */}
+          {stream && (
+            <Grid item xs={12} sm={getGridCols()} md={getGridCols()}>
               <Box
                 sx={{
-                  position: "absolute",
-                  bottom: 8,
-                  left: 8,
-                  backgroundColor: "rgba(0,0,0,0.6)",
-                  color: "#fff",
-                  padding: "4px 8px",
-                  borderRadius: 4,
+                  position: "relative",
+                  height: { xs: "200px", sm: "250px", md: "300px" }, // Better aspect ratio heights
+                  backgroundColor: "#202124",
+                  borderRadius: 2,
+                  overflow: "hidden",
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
+                  border: "2px solid #1a73e8",
                 }}
               >
-                {/* Display (You) next to the local user's name */}
-                <Typography variant="body2">{name || "You"} (You)</Typography>
+                <video
+                  playsInline
+                  muted
+                  ref={myVideo}
+                  autoPlay
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  }}
+                />
+                
+                {/* Local video overlay */}
+                <Box
+                  sx={{
+                    position: "absolute",
+                    bottom: 8,
+                    left: 8,
+                    right: 8,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <Box
+                    sx={{
+                      backgroundColor: "rgba(26, 115, 232, 0.9)",
+                      color: "#ffffff",
+                      padding: "4px 8px",
+                      borderRadius: "12px",
+                      backdropFilter: "blur(4px)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 500, fontSize: "0.75rem" }}>
+                      {name || "You"} (You)
+                    </Typography>
+                  </Box>
+                </Box>
               </Box>
-            </Paper>
-          </Grid>
-        )}
+            </Grid>
+          )}
 
-        {/* Render each remote peer’s video */}
-        {peers.map((peerObj) => (
-          // Only render PeerVideo component if the remote stream is available for this peer
-          // The PeerVideo component itself handles showing a "connecting" message if no stream yet
-          <Grid key={peerObj.peerID} item xs={12} sm={6} md={4}>
-            <PeerVideo remoteStream={peerObj.stream} peerName={peerObj.name} />
-          </Grid>
-        ))}
-      </Grid>
+          {/* Remote Peer Videos */}
+          {peers.map((peerObj) => (
+            <Grid key={peerObj.peerID} item xs={12} sm={getGridCols()} md={getGridCols()}>
+              <PeerVideo remoteStream={peerObj.stream} peerName={peerObj.name} />
+            </Grid>
+          ))}
+        </Grid>
+
+        {/* Empty state when no participants */}
+        {!stream && peers.length === 0 && (
+          <Box
+            sx={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "200px",
+              color: "#5f6368",
+              textAlign: "center",
+            }}
+          >
+            <Avatar
+              sx={{
+                width: 60,
+                height: 60,
+                backgroundColor: "#f1f3f4",
+                color: "#5f6368",
+                mb: 2,
+              }}
+            >
+              <Person sx={{ fontSize: 30 }} />
+            </Avatar>
+            <Typography variant="h6" sx={{ mb: 1, fontWeight: 500, fontSize: "1.1rem" }}>
+              Waiting for others to join
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Share the meeting ID to invite participants
+            </Typography>
+          </Box>
+        )}
+      </Box>
     </Box>
   );
 };

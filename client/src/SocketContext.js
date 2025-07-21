@@ -3,7 +3,9 @@ import { io } from "socket.io-client";
 import Peer from "simple-peer";
 
 const SocketContext = createContext();
-const socket = io("http://localhost:5000", { transports: ["websocket"] });
+const socket = io(process.env.REACT_APP_SERVER_URL || "http://localhost:5000", { 
+  transports: ["websocket", "polling"] 
+});
 
 const ContextProvider = ({ children }) => {
   const [stream, setStream] = useState(null);
@@ -11,6 +13,7 @@ const ContextProvider = ({ children }) => {
   const [peers, setPeers] = useState([]); // List of { peerID, peer, name, stream }
   const [name, setName] = useState("");
   const [roomId, setRoomId] = useState("");
+  const [chatMessages, setChatMessages] = useState([]); // Chat messages state
 
   const myVideo = useRef();
   const peersRef = useRef([]);
@@ -82,6 +85,7 @@ const ContextProvider = ({ children }) => {
       socket.connect();
     }
 
+    console.log(`Joining room: ${roomId} as ${name}`);
     socket.emit("join-room", { roomId, name });
   };
 
@@ -91,14 +95,23 @@ const ContextProvider = ({ children }) => {
 
     /**
      * Helper function to create and configure a Simple-Peer instance.
-     * This function now ensures that the 'stream' property is updated in the 'peers' state
-     * when a remote stream is received.
      */
     const createPeer = (userToSignal, initiator, localStream, initialName) => {
       const peer = new Peer({
         initiator,
         trickle: false,
         stream: localStream,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+            {
+              urls: "turn:openrelay.metered.ca:80",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+          ],
+        },
       });
 
       peer.on("signal", (signal) => {
@@ -110,7 +123,7 @@ const ContextProvider = ({ children }) => {
         });
       });
 
-      // Crucial change: Update the 'peers' state with the remote stream
+      // Update the 'peers' state with the remote stream
       peer.on("stream", (remoteStream) => {
         console.log(`Received remote stream from ${userToSignal}`);
         setPeers((prevPeers) => {
@@ -118,15 +131,13 @@ const ContextProvider = ({ children }) => {
             (p) => p.peerID === userToSignal
           );
           if (existingPeerIndex > -1) {
-            // If peer already exists in state, update its stream
             const updatedPeers = [...prevPeers];
             updatedPeers[existingPeerIndex] = {
               ...updatedPeers[existingPeerIndex],
-              stream: remoteStream, // <<< THIS LINE IS CRUCIAL
+              stream: remoteStream,
             };
             return updatedPeers;
           } else {
-            // Fallback: If for some reason peer isn't in state yet, add it with stream
             return [
               ...prevPeers,
               { peerID: userToSignal, peer, name: initialName, stream: remoteStream },
@@ -153,7 +164,7 @@ const ContextProvider = ({ children }) => {
       console.log("Received all users:", users);
       const peersFromUsers = [];
       users.forEach((user) => {
-        const peer = createPeer(user.id, true, stream, user.name); // Pass user.name for initial peer object
+        const peer = createPeer(user.id, true, stream, user.name);
         peersRef.current.push({ peerID: user.id, peer, name: user.name, stream: null });
         peersFromUsers.push({ peerID: user.id, peer, name: user.name, stream: null });
       });
@@ -165,7 +176,7 @@ const ContextProvider = ({ children }) => {
     // Listener for new users connecting (for non-initiators)
     const handleUserConnected = (payload) => {
       console.log("User connected:", payload.callerId);
-      const peer = createPeer(payload.callerId, false, stream, payload.callerName); // Pass callerName
+      const peer = createPeer(payload.callerId, false, stream, payload.callerName);
       peersRef.current.push({ peerID: payload.callerId, peer, name: payload.callerName, stream: null });
       setPeers((prev) => [
         ...prev,
@@ -205,7 +216,7 @@ const ContextProvider = ({ children }) => {
 
     socket.on("receiving-returned-signal", handleReceivingReturnedSignal);
 
-    // NEW: Listen for track state changes from other users
+    // Listen for track state changes from other users
     const handleTrackStateChange = (payload) => {
       console.log("Received track state change:", payload);
       const { userId, trackType, enabled } = payload;
@@ -228,6 +239,27 @@ const ContextProvider = ({ children }) => {
 
     socket.on("track-state-change", handleTrackStateChange);
 
+    // Chat: Listen for incoming messages (only from others)
+    const handleReceiveChatMessage = (payload) => {
+      console.log('[CHAT] Received:', payload, 'My ID:', socket.id);
+      // Only add messages that are NOT from the current user
+      if (payload.senderId !== socket.id) {
+        setChatMessages((prev) => [
+          ...prev,
+          {
+            message: payload.message,
+            senderName: payload.senderName,
+            senderId: payload.senderId,
+            timestamp: payload.timestamp,
+            self: false,
+          },
+        ]);
+      } else {
+        console.log('[CHAT] Ignoring own message from server');
+      }
+    };
+    socket.on("receive-chat-message", handleReceiveChatMessage);
+
     // Cleanup these listeners when the component unmounts or when stream/name change
     return () => {
       socket.off("all-users", handleAllUsers);
@@ -235,6 +267,7 @@ const ContextProvider = ({ children }) => {
       socket.off("user-joined", handleUserJoined);
       socket.off("receiving-returned-signal", handleReceivingReturnedSignal);
       socket.off("track-state-change", handleTrackStateChange);
+      socket.off("receive-chat-message", handleReceiveChatMessage);
     };
   }, [stream, name]);
 
@@ -273,6 +306,7 @@ const ContextProvider = ({ children }) => {
       socket.off("receiving-returned-signal");
       socket.off("user-disconnected");
       socket.off("track-state-change");
+      socket.off("receive-chat-message");
       socket.disconnect();
     };
   }, []);
@@ -287,16 +321,62 @@ const ContextProvider = ({ children }) => {
     }
     setName("");
     setRoomId("");
+    setChatMessages([]); // Clear chat messages when leaving
     joinedRef.current = false;
   };
 
-  // NEW: Function to notify other users about track state changes
+  // Function to notify other users about track state changes
   const notifyTrackStateChange = (trackType, enabled) => {
     socket.emit("track-state-change", {
       roomId,
       trackType,
       enabled,
       userId: socket.id
+    });
+  };
+
+  // FIXED: Function to send chat message with duplicate prevention
+  const sendChatMessage = (message) => {
+    if (!roomId || !name || !me) {
+      console.log("Cannot send message: missing roomId, name, or me");
+      return;
+    }
+    console.log('[CHAT] Sending:', { roomId, message, senderName: name, senderId: me });
+    
+    const timestamp = Date.now();
+    
+    // Add message locally for immediate display
+    setChatMessages((prev) => {
+      // Check if this exact message already exists (prevent duplicates)
+      const exists = prev.some(msg => 
+        msg.message === message && 
+        msg.senderId === me && 
+        Math.abs(msg.timestamp - timestamp) < 1000 // Within 1 second
+      );
+      
+      if (exists) {
+        console.log('[CHAT] Preventing duplicate local message');
+        return prev;
+      }
+      
+      return [
+        ...prev,
+        {
+          message,
+          senderName: name,
+          senderId: me,
+          timestamp,
+          self: true,
+        },
+      ];
+    });
+    
+    // Send to server to broadcast to other users
+    socket.emit("send-chat-message", {
+      roomId,
+      message,
+      senderName: name,
+      senderId: me,
     });
   };
 
@@ -313,9 +393,11 @@ const ContextProvider = ({ children }) => {
         setRoomId,
         joinRoom,
         leaveRoom,
-        setStream, // Expose setStream to consumers
-        notifyTrackStateChange, // NEW: Expose the notification function
-        updatePeerStreams, // NEW: Expose the peer stream update function
+        setStream,
+        notifyTrackStateChange,
+        updatePeerStreams,
+        chatMessages,
+        sendChatMessage,
       }}
     >
       {children}
