@@ -2,14 +2,14 @@
 A **real-time video conferencing application** built using **React.js, WebRTC, and Socket.io**, similar to Google Meet. Users can create and join meetings, share screens, and chat in real-time.  
 
 ##  Features  
-### **Real-time video & audio communication** using WebRTC  
-### **Multiple participants** in a single meeting  
-### **Unique meeting links** for easy joining  
-### **Screen sharing** for presentations  
-### **In-meeting chat** with text messaging  
-### **Mute/Unmute & Video On/Off toggles**  
-### **Peer-to-peer communication** using WebRTC  
-### **Efficient signaling** with Socket.io  
+**Real-time video & audio communication** using WebRTC  
+**Multiple participants** in a single meeting  
+**Unique meeting links** for easy joining  
+**Screen sharing** for presentations  
+**In-meeting chat** with text messaging  
+**Mute/Unmute & Video On/Off toggles**  
+**Peer-to-peer communication** using WebRTC  
+**Efficient signaling** with Socket.io  
 
 ---
 
@@ -75,11 +75,11 @@ Go to **`http://localhost:3000`** in your browser and start a meeting. 🎥
 ---
 
 ## How It Works  
-### A user **creates a meeting** and gets a **unique meeting link**.  
-### Other participants **join using the same link**.  
-### WebRTC establishes a **peer-to-peer video & audio connection**.  
-### Socket.io handles **signaling for connection setup**.  
-### Users can **enable/disable audio/video, chat, and share screens**.  
+A user **creates a meeting** and gets a **unique meeting link**.  
+Other participants **join using the same link**.  
+WebRTC establishes a **peer-to-peer video & audio connection**.  
+Socket.io handles **signaling for connection setup**.  
+Users can **enable/disable audio/video, chat, and share screens**.  
 
 ---
 
